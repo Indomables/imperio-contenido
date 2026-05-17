@@ -42,6 +42,7 @@ export const piezas = {
 
 // MÉTRICAS
 export const metricas = {
+  all: () => request("GET", "/metricas"),
   byPieza: (piezaId) => request("GET", `/metricas/${piezaId}`),
   upsert: (piezaId, datos) => request("PUT", `/metricas/${piezaId}`, { datos }),
 };

@@ -12,7 +12,8 @@ import {
 /**
  * Métricas externas por pieza (Kit, Zernio, Instagram).
  *
- *   GET /api/metricas/:piezaId     → obtener métricas
+ *   GET /api/metricas              → listar todas (para Análisis)
+ *   GET /api/metricas/:piezaId     → obtener una
  *   PUT /api/metricas/:piezaId     → upsert { datos: {...} } o {...}
  *
  * El campo `datos` es JSONB libre; su shape depende del integrador.
@@ -21,9 +22,20 @@ export default async (req: Request, _context: Context) => {
   const segments = getPathSegments(req.url);
   const piezaId = segments[1];
 
-  if (!piezaId) return badRequest("piezaId requerido en la URL");
-
   try {
+    // ── GET /api/metricas (todas) ───────────────────────
+    if (req.method === "GET" && !piezaId) {
+      const rows = await db.sql`
+        SELECT pieza_id, datos, updated_at
+        FROM metricas
+        ORDER BY updated_at DESC
+      `;
+      return json(rows);
+    }
+
+    // A partir de aquí, todas las rutas necesitan piezaId
+    if (!piezaId) return badRequest("piezaId requerido en la URL");
+
     if (req.method === "GET") {
       const rows = await db.sql`
         SELECT * FROM metricas WHERE pieza_id = ${piezaId}
@@ -54,5 +66,5 @@ export default async (req: Request, _context: Context) => {
 };
 
 export const config: Config = {
-  path: "/api/metricas/*",
+  path: ["/api/metricas", "/api/metricas/*"],
 };

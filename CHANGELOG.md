@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Fase 3B · Análisis funcional · v0.44.0-α (2026-05-17)
+
+**Hito**: la pestaña Análisis muestra datos reales. Filtros por periodo y tipo, KPIs y tabla dinámicos según el formato seleccionado, headers sortable.
+
+### Añadido
+- `GET /api/metricas` (listado masivo) — antes solo existía `GET /api/metricas/:piezaId`.
+- `metricas.all()` en el cliente `lib/api.js`.
+- `Analisis.jsx` reescrito:
+  - Configuración declarativa por formato (`FORMATO_CONFIG`) con sus KPIs y columnas.
+  - Email · KPIs: Emails publicados, Apertura media, Clic medio, Revenue atribuido. Columnas: Enviados / Aperturas / %Apertura / Clics / %Clics / Replies / Bajas / %Bajas / Revenue (€).
+  - Reel y Grieta · KPIs: count, likes medios, comentarios medios, miembros Skool. Columnas: Likes / Comentarios / Miembros Skool.
+  - YouTube · KPIs: count, views medias, likes medios, comentarios medios. Columnas: Views / Likes / Comentarios.
+  - Relámpago · estructura preparada, datos vendrán con la edge function correspondiente.
+  - Filtros por periodo: 30d / 90d / 6m / Todo. Aplican sobre `fecha_publicacion`.
+  - Solo cuenta piezas publicadas (`fecha_publicacion` ≤ hoy).
+  - Headers sortable: 1 click desc → 2 click asc → 3 click reset.
+  - Contadores en los chips de tipo (reflejan el periodo activo).
+  - Click en fila abre `CardModal` igual que en Tablero.
+
+### Pendiente
+- Replies y Revenue (€) para Email — son métricas manuales gestionadas desde chat. Las columnas existen, mostrarán `—` hasta que las metas.
+- Datos de YouTube y Relámpago — vienen cuando se porten las edge functions.
+- Drag & drop entre carriles del Tablero (Fase 3A pendiente).
+- Dashboard real (Fase 3C).
+
+---
+
 ## Fase 1 · Cimientos · v0.42.0-alpha (2026-05-17)
 
 **Hito**: scaffold completo. La app despliega y muestra la estética SOMA OS aunque sin datos reales.
