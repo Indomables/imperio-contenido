@@ -22,6 +22,7 @@ import {
   capture as captureApi,
 } from "../lib/api";
 import CardModal from "../components/CardModal";
+import { usePageStatus } from "../lib/pageStatus.jsx";
 
 // Carriles de piezas — meta de cada columna del kanban.
 // 04 lleva `state: "active"` → estilos blancos brillantes en el header.
@@ -165,6 +166,81 @@ export default function Tablero() {
   }, [ideas, piezasByIdea]);
 
   const piezasPorColumna = (col) => piezas.filter((p) => p.columna === col);
+
+  // Contadores para la statusbar inferior (los reporta usePageStatus abajo).
+  // PIEZAS = todas las no publicadas (igual que en Dashboard).
+  const cuentaAgendadas  = piezas.filter((p) => p.columna === "agendado").length;
+  const cuentaPublicadas = piezas.filter((p) => p.columna === "publicado").length;
+  const cuentaNoPublicadas = piezas.length - cuentaPublicadas;
+
+  // ─── StatusBar contextual ────────────────────────────────────
+  // Reportamos contadores reales al right del statusbar (antes salían
+  // como `—` porque no había context aplicado a esta pestaña).
+  const pageStatus = useMemo(
+    () => ({
+      right: [
+        { text: "IDEAS ",      strong: String(ideas.length) },
+        { text: "PIEZAS ",     strong: String(cuentaNoPublicadas) },
+        { text: "AGENDADAS ",  strong: String(cuentaAgendadas) },
+        { text: "PUBLICADAS ", strong: String(cuentaPublicadas) },
+      ],
+    }),
+    [ideas.length, cuentaNoPublicadas, cuentaAgendadas, cuentaPublicadas],
+  );
+  usePageStatus(pageStatus);
+
+  // ─── Drag & Drop entre carriles ──────────────────────────────
+  // - Solo se arrastran piezas (carriles 02-05). Las ideas (01) no son
+  //   arrastrables: el flujo idea → pieza pasa por el botón ✂ "Dar forma".
+  // - Drop zones: las 4 columnas de piezas (no la columna Ideas).
+  // - Update optimista: cambio columna en estado local de inmediato y luego
+  //   sincronizo con la BD; si falla, revierto.
+  const [dragOver, setDragOver] = useState(null);
+
+  function handleDragStart(e, pieza) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData(
+      "application/json",
+      JSON.stringify({ id: pieza.id, from: pieza.columna }),
+    );
+  }
+
+  function handleDragOver(e, columna) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOver !== columna) setDragOver(columna);
+  }
+
+  function handleDragLeave(e, columna) {
+    // Solo limpiar si el target relacionado ya no está dentro de la columna
+    // (evita parpadeo al cruzar hijos)
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    if (dragOver === columna) setDragOver(null);
+  }
+
+  async function handleDrop(e, toColumna) {
+    e.preventDefault();
+    setDragOver(null);
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    let data;
+    try { data = JSON.parse(raw); } catch { return; }
+    if (!data?.id || !data?.from || data.from === toColumna) return;
+
+    // Optimistic: actualizo UI ya
+    const prev = piezas;
+    setPiezas((arr) =>
+      arr.map((p) => (p.id === data.id ? { ...p, columna: toColumna } : p)),
+    );
+
+    try {
+      await piezasApi.update(data.id, { columna: toColumna });
+    } catch (err) {
+      // Revert si la API falla
+      setPiezas(prev);
+      setErr(`Mover falló: ${err.message || err}`);
+    }
+  }
 
   // ─── Acciones ────────────────────────────────────────────────
   async function handleCapture(e) {
@@ -368,11 +444,30 @@ export default function Tablero() {
         {/* ═══ COLS 02-05 · PIEZAS ═══ */}
         {CARRIL_PIEZAS.map((c) => {
           const pcol = piezasPorColumna(c.columna);
-          const colClass = `kcol${c.state ? ` ${c.state}` : ""}`;
+          const isOverHere = dragOver === c.columna;
+          const colClass = `kcol${c.state ? ` ${c.state}` : ""}${isOverHere ? " kcol-dragover" : ""}`;
           const showFuture = c.columna === "agendado";
           const showPast   = c.columna === "publicado";
+          // Iluminamos la columna cuando se arrastra algo encima (inline
+          // porque la regla no existe en el CSS y queremos mantener los
+          // archivos de estilo byte-perfect con Claude Design).
+          const dragOverStyle = isOverHere
+            ? {
+                outline: "2px solid var(--acc)",
+                outlineOffset: "-2px",
+                background:
+                  "linear-gradient(180deg, var(--acc-bg2) 0%, oklch(0.125 0.014 235) 100%)",
+              }
+            : undefined;
           return (
-            <section key={c.ix} className={colClass}>
+            <section
+              key={c.ix}
+              className={colClass}
+              style={dragOverStyle}
+              onDragOver={(e) => handleDragOver(e, c.columna)}
+              onDragLeave={(e) => handleDragLeave(e, c.columna)}
+              onDrop={(e) => handleDrop(e, c.columna)}
+            >
               <span className="br-tr"></span>
               <span className="br-bl"></span>
               <header className="kcol-h">
@@ -426,6 +521,8 @@ export default function Tablero() {
                       <article
                         key={p.id}
                         className={`kcard t-${p.formato}`}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, p)}
                         onClick={() => setSelected({ kind: "pieza", data: p })}
                       >
                         <span className={`kbadge t-${p.formato} ${isRelampago ? "special relampago" : ""}`}>

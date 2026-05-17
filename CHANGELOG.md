@@ -1,5 +1,57 @@
 # CHANGELOG
 
+## Fase 4 · Drag & drop en el Tablero · v0.47.0-α (2026-05-17)
+
+**Hito**: El Tablero pasa de visual a operativo — ahora puedes mover piezas
+entre carriles arrastrando.
+
+### Añadido
+
+**Tablero · Drag & drop entre carriles** (HTML5 nativo, cero dependencias):
+- Cards de piezas (carriles 02-05) son arrastrables (`draggable`).
+- Las 4 columnas de piezas son drop zones.
+- Carril 01 "Ideas" sigue fijo (las ideas no son piezas — su flujo de
+  conversión pasa por el botón ✂ "Dar forma").
+- **Update optimista**: al soltar, el UI se actualiza al instante y la BD
+  se sincroniza en background. Si la API falla, se revierte el cambio.
+- **Feedback visual**: la columna destino se ilumina con borde acento y
+  un suave gradient cuando arrastras algo encima. La regla se aplica
+  inline en JSX (no toca `contenido.css`, que sigue byte-perfect con
+  Claude Design).
+- Drop sobre la misma columna de origen → no-op (no llama API
+  innecesariamente).
+- Mensaje de error visible en el banner superior si la API falla.
+
+**Tablero · StatusBar contextual**:
+- Reporta contadores reales al right del statusbar:
+  `IDEAS X · PIEZAS X · AGENDADAS X · PUBLICADAS X` (antes salían como `—`).
+- Coincide con el patrón ya aplicado en Dashboard.
+- Las 3 pestañas reportan ya su contexto:
+  - Dashboard → contadores reales.
+  - Tablero → contadores reales.
+  - Análisis → `FILTRO {TIPO} · {PERIODO}` · `FILAS N` · `BENCHMARK ≈ SECTOR` · `ATRIBUCIÓN OK`.
+
+### Conservado
+- Click en card sigue abriendo CardModal (los handlers de drag no rompen el click).
+- Toda la lógica de filtros de Ideas, capture bar y modal sigue igual.
+- Sistema visual (CSS): sin tocar — los 4 CSS siguen byte-perfect.
+
+### Notas técnicas
+- Drag & drop es HTML5 nativo (`onDragStart` / `onDragOver` / `onDragLeave` /
+  `onDrop`). Funciona en desktop. En mobile no hay drag & drop nativo; si en
+  el futuro Soma usa el Tablero en iPad/móvil, habría que añadir una librería
+  como `@dnd-kit/core` que soporta touch.
+- La API ya soportaba `piezas.update(id, { columna: ... })` desde Fase 2 —
+  solo había que llamarla desde el handler.
+
+### Pendiente
+- Tablero: ordenar piezas dentro de un mismo carril por drag (ahora solo
+  cambia columna). No prioritario.
+- Port de 6 edge functions de Supabase → Netlify Scheduled Functions.
+- Cuando se active tracking de Clics: quitar `noTrackingYet` en Análisis.
+
+---
+
 ## Fase 3C · Dashboard clavado a Claude Design · v0.46.0-α (2026-05-17)
 
 **Hito**: Dashboard funcional con 8 paneles, paridad pixel-perfect con la
