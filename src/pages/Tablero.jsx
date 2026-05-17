@@ -49,6 +49,14 @@ const FORMATO_LABEL = {
   grieta:    "Grieta",
 };
 
+// Label corto de columna para el popover de piezas asociadas.
+const COLUMNA_LABEL = {
+  desarrollo: "En desarrollo",
+  listo:      "Listo",
+  agendado:   "Agendado",
+  publicado:  "Publicado",
+};
+
 // Subtítulo descriptivo para cards en "En desarrollo" si no tienen
 // plataformas[] definido. (.subnm en el HTML de Claude Design.)
 const SUBNM_DEFAULT = {
@@ -151,6 +159,10 @@ export default function Tablero() {
   // Mini-modal para meter métricas manuales (replies + revenue_eur).
   // Se abre con el icono ▥ (StatsIcon) en cards de email/relampago publicadas.
   const [metricasModalPieza, setMetricasModalPieza] = useState(null);
+  // Popover que enumera las piezas asociadas a una idea. Se abre al
+  // hacer click sobre el contador "N piezas" en las cards de Ideas.
+  // Guarda el id de la idea cuya lista de piezas está visible.
+  const [piezasPopoverIdeaId, setPiezasPopoverIdeaId] = useState(null);
 
   const reload = useCallback(async () => {
     try {
@@ -167,6 +179,19 @@ export default function Tablero() {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Cierra el popover de piezas asociadas con ESC o al hacer click fuera.
+  useEffect(() => {
+    if (!piezasPopoverIdeaId) return;
+    const onKey = (e) => { if (e.key === "Escape") setPiezasPopoverIdeaId(null); };
+    const onClick = () => setPiezasPopoverIdeaId(null);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("click", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("click", onClick);
+    };
+  }, [piezasPopoverIdeaId]);
 
   // Índice de piezas por idea_id para lookup rápido y aplicar filtros de Ideas.
   const piezasByIdea = useMemo(() => {
@@ -505,15 +530,61 @@ export default function Tablero() {
                     )}
                     {hasPiezas ? (
                       <div className="kcard-foot">
-                        <span className="pieza-count has">
+                        <button
+                          type="button"
+                          className="pieza-count has"
+                          title="Ver piezas asociadas"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPiezasPopoverIdeaId(
+                              piezasPopoverIdeaId === idea.id ? null : idea.id
+                            );
+                          }}
+                        >
                           <span className="d"></span>
                           {piezasDeIdea.length} pieza{piezasDeIdea.length === 1 ? "" : "s"}
-                        </span>
+                        </button>
                         <button
                           className="cut-btn"
                           title="Dar forma — crear nueva pieza a partir de esta idea"
                           onClick={(e) => handleDarFormaClick(idea, e)}
                         >✂</button>
+
+                        {piezasPopoverIdeaId === idea.id && (
+                          <div
+                            className="pieza-pop"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <header className="pieza-pop-h">
+                              <span className="dot"></span>
+                              <span className="ttl">Piezas asociadas</span>
+                              <span className="count">{piezasDeIdea.length}</span>
+                            </header>
+                            <ul className="pieza-pop-list">
+                              {piezasDeIdea.map((p) => (
+                                <li
+                                  key={p.id}
+                                  className="pieza-pop-item"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPiezasPopoverIdeaId(null);
+                                    setSelected({ kind: "pieza", data: p });
+                                  }}
+                                >
+                                  <span className={`pieza-pop-fmt t-${p.formato}`}>
+                                    {FORMATO_LABEL[p.formato] || p.formato}
+                                  </span>
+                                  <span className="pieza-pop-tt">
+                                    {p.titulo || "(sin título)"}
+                                  </span>
+                                  <span className="pieza-pop-col">
+                                    {COLUMNA_LABEL[p.columna] || p.columna}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <button

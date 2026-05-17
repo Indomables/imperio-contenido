@@ -319,11 +319,21 @@
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--line);
   font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.10em; color: var(--ink-4);
+  position: relative;
 }
 .kcard-foot .pieza-count {
   display: inline-flex; align-items: center; gap: 5px;
   color: var(--ink-3);
+  background: transparent; border: 0;
+  font-family: inherit; font-size: inherit; letter-spacing: inherit;
+  padding: 0; cursor: default;
 }
+button.kcard-foot .pieza-count,
+.kcard-foot button.pieza-count {
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.kcard-foot button.pieza-count:hover { color: var(--acc); }
 .kcard-foot .pieza-count.has { color: var(--acc); }
 .kcard-foot .pieza-count.has .d { width: 4px; height: 4px; background: var(--acc); box-shadow: var(--acc-glow); }
 .kcard-foot .pieza-count .d { width: 4px; height: 4px; background: var(--ink-4); }
@@ -334,6 +344,90 @@
   font-family: var(--mono); font-size: 11px; line-height: 1;
 }
 .kcard-foot .cut-btn:hover, .kcard-foot .open-btn:hover { color: var(--acc); border-color: var(--acc); }
+
+/* Popover de piezas asociadas (click en "N piezas" de una idea) */
+.pieza-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);   /* sale ARRIBA del footer (alineado con el mockup) */
+  left: 0; right: 0;
+  z-index: 20;
+  min-width: 280px;
+  background: linear-gradient(180deg, var(--bg-1), var(--bg));
+  border: 1px solid var(--line-2);
+  box-shadow: 0 -10px 28px oklch(0.05 0.01 235 / 0.7);
+  animation: piezaPopIn 0.18s ease-out;
+}
+.pieza-pop::after {
+  /* Flecha apuntando al botón ("1 pieza") */
+  content: "";
+  position: absolute;
+  bottom: -6px; left: 18px;
+  width: 10px; height: 6px;
+  background: var(--bg);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  border-right: 1px solid var(--line-2);
+}
+@keyframes piezaPopIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.pieza-pop-h {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.pieza-pop-h .dot {
+  width: 5px; height: 5px;
+  background: var(--acc); box-shadow: var(--acc-glow);
+}
+.pieza-pop-h .ttl { flex: 1; }
+.pieza-pop-h .count {
+  color: var(--acc);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pieza-pop-list {
+  list-style: none;
+  margin: 0; padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.pieza-pop-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.pieza-pop-item:last-child { border-bottom: 0; }
+.pieza-pop-item:hover { background: var(--acc-bg2); }
+.pieza-pop-fmt {
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.18em;
+  text-transform: uppercase; font-weight: 500;
+  padding: 3px 6px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.pieza-pop-fmt.t-email     { color: var(--acc);                border-color: oklch(from var(--acc) l c h / 0.55);            background: var(--acc-bg2); }
+.pieza-pop-fmt.t-reel      { color: oklch(0.75 0.18 55);       border-color: oklch(0.75 0.18 55 / 0.55);                     background: oklch(0.75 0.18 55 / 0.10); }
+.pieza-pop-fmt.t-relampago { color: oklch(0.78 0.18 245);      border-color: oklch(0.78 0.18 245 / 0.55);                    background: oklch(0.78 0.18 245 / 0.10); }
+.pieza-pop-fmt.t-youtube   { color: oklch(0.62 0.24 25);       border-color: oklch(0.62 0.24 25 / 0.55);                     background: oklch(0.62 0.24 25 / 0.10); }
+.pieza-pop-fmt.t-grieta    { color: oklch(0.70 0.18 350);      border-color: oklch(0.70 0.18 350 / 0.55);                    background: oklch(0.70 0.18 350 / 0.10); }
+.pieza-pop-tt {
+  flex: 1;
+  font-family: var(--sans); font-size: 12px;
+  color: var(--ink); letter-spacing: -0.005em;
+  line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pieza-pop-col {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--ink-4);
+  flex-shrink: 0;
+}
 
 /* Date row inside scheduled / published cards */
 .kdate {
@@ -518,3 +612,4 @@
   color: var(--neg);
   border-color: var(--neg);
 }
+

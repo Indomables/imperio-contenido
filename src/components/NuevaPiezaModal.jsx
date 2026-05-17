@@ -1,54 +1,42 @@
 /**
- * NuevaPiezaModal — Modal completo para crear una pieza nueva.
+ * NuevaPiezaModal — Modal para crear una pieza nueva.
  *
- * Reemplaza al flujo anterior de pasos. Muestra todos los campos
- * en una sola vista, con los campos de contenido que cambian según
- * el formato elegido.
+ * Rediseñado según handoff de Claude Design (Soma OS HUD).
+ * Chasis HUD completo: corchetes + tornillos + scanline + LED pulsante
+ * en header + reloj SYNC vivo + sub-paneles numerados + footer statusbar
+ * con DRAFT / contador palabras / requeridos / autoguardado countdown.
  *
- * Si se pasa `ideaId`, la pieza queda vinculada a esa idea. El header
- * muestra "DESDE «<idea_title>»" en ese caso.
- *
- * Estructura del JSON que envía a la API:
- *   {
- *     titulo: string,                          // título INTERNO
- *     formato: "email"|"reel"|"relampago"|"youtube"|"grieta",
- *     columna: "desarrollo",                   // siempre arranca aquí
- *     plataformas: ["Kit"] | ["Acumbamail"] | [],
- *     contenido: { ...campos según formato },
- *     fecha_publicacion: ISO | null,
- *     url_publicacion: string,
- *     notas: string,                           // notas internas
- *     idea_id?: string
- *   }
+ * Se abre desde:
+ *  · el "+" de las columnas Ideas/Desarrollo (sin idea de origen)
+ *  · el "✂ Dar forma" de una card de Idea (con idea_id pre-vinculado)
  */
 
-import { useState, useEffect, useRef } from "react";
-import RichTextEditor from "./RichTextEditor";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { piezasApi } from "../api/piezas";
 
 const FORMATOS = [
-  { value: "email",     label: "Email" },
-  { value: "reel",      label: "Reel" },
-  { value: "relampago", label: "Relámpago" },
-  { value: "youtube",   label: "YouTube" },
-  { value: "grieta",    label: "Grieta" },
+  { val: "email",     label: "Email"     },
+  { val: "reel",      label: "Reel"      },
+  { val: "relampago", label: "Relámpago" },
+  { val: "youtube",   label: "YouTube"   },
+  { val: "grieta",    label: "Grieta"    },
 ];
 
-const PLATAFORMAS_EMAIL = [
-  { value: "Kit",        label: "Kit" },
-  { value: "Acumbamail", label: "Acumbamail" },
-];
-
-export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClose, onCreate }) {
+export default function NuevaPiezaModal({ onClose, onCreated, idea = null, defaultColumna = "desarrollo" }) {
   const [titulo, setTitulo] = useState("");
   const [formato, setFormato] = useState("email");
-  const [plataforma, setPlataforma] = useState("Kit");
-  const [contenido, setContenido] = useState({}); // campos varían por formato
+  const [plataforma, setPlataforma] = useState("kit"); // solo para email
+  const [contenido, setContenido] = useState({});
   const [fechaPublicacion, setFechaPublicacion] = useState("");
   const [urlPublicacion, setUrlPublicacion] = useState("");
-  const [notasInternas, setNotasInternas] = useState("");
+  const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
+  const [clockNow, setClockNow] = useState(formatClock(new Date()));
+  const [autosaveSec, setAutosaveSec] = useState(24);
   const tituloRef = useRef(null);
+  const editorRef = useRef(null);
 
+  // Foco inicial + ESC para cerrar
   useEffect(() => {
     if (tituloRef.current) tituloRef.current.focus();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -56,247 +44,442 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  function setContenidoField(key, value) {
-    setContenido((c) => ({ ...c, [key]: value }));
+  // Reloj SYNC vivo (tick 1s)
+  useEffect(() => {
+    const id = setInterval(() => setClockNow(formatClock(new Date())), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Autoguardado cosmético (loop 24→0)
+  useEffect(() => {
+    const id = setInterval(() => {
+      setAutosaveSec((s) => (s <= 0 ? 24 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Setear chip de plataforma según formato (solo email tiene chips)
+  function handleFormatoChange(f) {
+    setFormato(f);
+    setContenido({}); // reset contenido al cambiar formato
   }
 
-  function handleFormatoChange(newFormato) {
-    setFormato(newFormato);
-    if (newFormato !== "email") setPlataforma(null);
-    else if (!plataforma) setPlataforma("Kit");
-  }
+  // Texto del editor activo (para contador palabras)
+  const editorText = getEditorText(formato, contenido);
+  const wordCount = countWords(editorText);
+  const readingMin = Math.max(0, Math.round((wordCount / 220) * 10) / 10);
+  const requeridosLeft = titulo.trim() ? 0 : 1;
+  const draftState = anyFilled(titulo, contenido, urlPublicacion, notas) ? "UNSAVED" : "EMPTY";
+  const ventanaState = fechaPublicacion ? "AGENDADA" : "LIBRE";
 
   async function handleSave() {
     if (!titulo.trim()) {
       tituloRef.current?.focus();
       return;
     }
-    const plataformas = formato === "email" && plataforma ? [plataforma] : [];
-    const payload = {
-      titulo: titulo.trim(),
-      formato,
-      columna: "desarrollo",
-      plataformas,
-      contenido,
-      fecha_publicacion: fechaPublicacion
-        ? new Date(fechaPublicacion).toISOString()
-        : null,
-      url_publicacion: urlPublicacion.trim(),
-      notas: notasInternas.trim(),
-      idea_id: ideaId,
-    };
     try {
       setSaving(true);
-      await onCreate(payload);
+      // Plataformas = ["kit"] o ["acumba"] solo si formato es email; si no, []
+      const plataformas = formato === "email" ? [plataforma] : [];
+      const payload = {
+        titulo: titulo.trim(),
+        formato,
+        columna: defaultColumna,
+        plataformas,
+        contenido,
+        fecha_publicacion: fechaPublicacion || null,
+        url_publicacion: urlPublicacion.trim(),
+        notas: notas.trim(),
+        idea_id: idea?.id || null,
+      };
+      const created = await piezasApi.create(payload);
+      onCreated?.(created);
       onClose();
     } catch (e) {
-      alert(`Error al crear: ${e.message || e}`);
+      alert(`Error al crear la pieza: ${e.message || e}`);
       setSaving(false);
     }
   }
 
-  return (
-    <div className="cm-overlay" onClick={onClose}>
-      <div className="cm-panel np-panel" onClick={(e) => e.stopPropagation()}>
+  const breadcrumb = idea
+    ? `DESDE «${(idea.titulo || "IDEA").toUpperCase()}»`
+    : `NUEVA · DESDE CERO`;
 
-        <header className="cm-head">
-          <div className="cm-head-l">
-            <span className="cm-kind">NUEVA PIEZA</span>
-            {ideaTitle && (
-              <>
-                <span className="cm-div">·</span>
-                <span className="cm-title">DESDE «{ideaTitle}»</span>
-              </>
-            )}
+  return (
+    <div className="modal-host" onClick={onClose}>
+      <div className="modal-scrim" />
+      <div className="somal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="somalTitle">
+
+        {/* Chassis HUD */}
+        <span className="s-br tl"></span><span className="s-br tr"></span>
+        <span className="s-br bl"></span><span className="s-br br"></span>
+        <span className="s-screw tl"></span><span className="s-screw tr"></span>
+        <span className="s-screw bl"></span><span className="s-screw br"></span>
+
+        {/* ─── HEADER ─── */}
+        <header className="somal-h">
+          <div className="l">
+            <span className="led"></span>
+            <span className="ix">00</span><span className="div">/</span>
+            <span className="ttl" id="somalTitle">Nueva Pieza</span>
+            <span className="sep">·</span>
+            <span className="src">{breadcrumb}</span>
           </div>
-          <div className="cm-head-r">
-            <button type="button" className="cm-x" onClick={onClose} title="Cerrar (ESC)">×</button>
+          <div className="r">
+            <span className="meta">SYNC <b>{clockNow}</b></span>
+            <button type="button" className="somal-x" onClick={onClose} aria-label="Cerrar (ESC)">×</button>
           </div>
         </header>
 
-        <div className="cm-body">
-          {/* ─── Título interno ─── */}
-          <label className="np-label">
-            <span className="np-label-tx">Título interno <span style={{ color: "var(--acc)" }}>*</span></span>
-            <input
-              ref={tituloRef}
-              type="text"
-              className="np-input"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-              placeholder="Cómo distingues internamente esta pieza"
-              maxLength={200}
-            />
-          </label>
+        {/* ─── BODY ─── */}
+        <div className="somal-body">
 
-          {/* ─── Formato ─── */}
-          <div className="np-label">
-            <span className="np-label-tx">Formato</span>
-            <div className="np-chip-row">
-              {FORMATOS.map((f) => (
-                <button
-                  key={f.value}
-                  type="button"
-                  className={`np-chip t-${f.value} ${formato === f.value ? "on" : ""}`}
-                  onClick={() => handleFormatoChange(f.value)}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* ═══ 01 · IDENTIDAD ═══ */}
+          <section className="msec">
+            <span className="br-tr"></span><span className="br-bl"></span>
+            <header className="msec-h">
+              <div className="t">
+                <span className="dot"></span>
+                <span className="ix">01</span><span className="div">/</span>
+                <span className="ttl">Identidad</span>
+              </div>
+              <div className="meta">REQUERIDOS <b className={requeridosLeft > 0 ? "acc" : ""}>{requeridosLeft}</b></div>
+            </header>
+            <div className="msec-body">
 
-          {/* ─── Lista de envío (solo email) ─── */}
-          {formato === "email" && (
-            <div className="np-label">
-              <span className="np-label-tx">Lista de envío</span>
-              <div className="np-chip-row">
-                {PLATAFORMAS_EMAIL.map((p) => (
-                  <button
-                    key={p.value}
-                    type="button"
-                    className={`np-chip ${plataforma === p.value ? "on" : ""}`}
-                    onClick={() => setPlataforma(p.value)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
+              <div className="mfield">
+                <label>Título interno <span className="req">*</span><span className="hint">· cómo distingues esta pieza</span></label>
+                <div className="minput">
+                  <input
+                    ref={tituloRef}
+                    type="text"
+                    value={titulo}
+                    onChange={(e) => setTitulo(e.target.value)}
+                    placeholder="Cómo distingues internamente esta pieza"
+                    maxLength={200}
+                  />
+                </div>
+              </div>
+
+              <div className="mrow">
+                <div className="mfield">
+                  <label>Formato</label>
+                  <div className="mchips">
+                    {FORMATOS.map((f) => (
+                      <button
+                        key={f.val}
+                        type="button"
+                        className={`mchip t-${f.val} ${formato === f.val ? "on" : ""}`}
+                        onClick={() => handleFormatoChange(f.val)}
+                      >
+                        <span className="led-mini"></span>{f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {formato === "email" && (
+                  <div className="mfield" style={{ maxWidth: 280 }}>
+                    <label>Lista de envío</label>
+                    <div className="mchips">
+                      <button
+                        type="button"
+                        className={`mchip ${plataforma === "kit" ? "on" : ""}`}
+                        onClick={() => setPlataforma("kit")}
+                      >
+                        <span className="led-mini"></span>Kit
+                      </button>
+                      <button
+                        type="button"
+                        className={`mchip ${plataforma === "acumba" ? "on" : ""}`}
+                        onClick={() => setPlataforma("acumba")}
+                      >
+                        <span className="led-mini"></span>Acumbamail
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          )}
+          </section>
 
-          {/* ─── Sección CONTENIDO ─── */}
-          <div className="np-divider"><span>Contenido</span></div>
-
-          {formato === "email" && (
-            <>
-              <label className="np-label">
-                <span className="np-label-tx">Asunto</span>
-                <input
-                  type="text"
-                  className="np-input"
-                  value={contenido.asunto || ""}
-                  onChange={(e) => setContenidoField("asunto", e.target.value)}
-                  placeholder="La línea que abre o no la abre…"
-                />
-              </label>
-              <label className="np-label">
-                <span className="np-label-tx">Preheader</span>
-                <input
-                  type="text"
-                  className="np-input"
-                  value={contenido.preheader || ""}
-                  onChange={(e) => setContenidoField("preheader", e.target.value)}
-                  placeholder="El texto que aparece en la bandeja de entrada…"
-                />
-              </label>
-              <div className="np-label">
-                <span className="np-label-tx">Cuerpo (~500 palabras)</span>
-                <RichTextEditor
-                  initialHtml=""
-                  onChange={(html) => setContenidoField("cuerpo", html)}
-                  placeholder="Escribe aquí…"
-                />
+          {/* ═══ 02 · CONTENIDO ═══ */}
+          <section className="msec">
+            <span className="br-tr"></span><span className="br-bl"></span>
+            <header className="msec-h">
+              <div className="t">
+                <span className="dot"></span>
+                <span className="ix">02</span><span className="div">/</span>
+                <span className="ttl">Contenido</span>
               </div>
-            </>
-          )}
-
-          {formato === "youtube" && (
-            <>
-              <label className="np-label">
-                <span className="np-label-tx">Título del video</span>
-                <input
-                  type="text"
-                  className="np-input"
-                  value={contenido.titulo_video || ""}
-                  onChange={(e) => setContenidoField("titulo_video", e.target.value)}
-                  placeholder="Cómo se llama el video en YouTube"
-                />
-              </label>
-              <div className="np-label">
-                <span className="np-label-tx">Guion</span>
-                <RichTextEditor
-                  initialHtml=""
-                  onChange={(html) => setContenidoField("guion", html)}
-                  placeholder="Escribe el guion aquí…"
-                />
-              </div>
-              <label className="np-label">
-                <span className="np-label-tx">Descripción</span>
-                <textarea
-                  className="np-textarea"
-                  value={contenido.descripcion || ""}
-                  onChange={(e) => setContenidoField("descripcion", e.target.value)}
-                  placeholder="Lo que va debajo del video en YouTube"
-                  rows={4}
-                />
-              </label>
-            </>
-          )}
-
-          {(formato === "reel" || formato === "relampago" || formato === "grieta") && (
-            <div className="np-label">
-              <span className="np-label-tx">Texto</span>
-              <RichTextEditor
-                initialHtml=""
-                onChange={(html) => setContenidoField("texto", html)}
-                placeholder="Escribe aquí…"
+              <div className="meta"><b>{wordCount}</b> / 500 W · <b>~{readingMin}</b> MIN LECTURA</div>
+            </header>
+            <div className="msec-body">
+              <ContenidoFields
+                formato={formato}
+                contenido={contenido}
+                setContenido={setContenido}
+                editorRef={editorRef}
               />
             </div>
-          )}
+          </section>
 
-          {/* ─── Sección PUBLICACIÓN ─── */}
-          <div className="np-divider"><span>Publicación</span></div>
+          {/* ═══ 03 · PUBLICACIÓN ═══ */}
+          <section className="msec">
+            <span className="br-tr"></span><span className="br-bl"></span>
+            <header className="msec-h">
+              <div className="t">
+                <span className="dot"></span>
+                <span className="ix">03</span><span className="div">/</span>
+                <span className="ttl">Publicación</span>
+              </div>
+              <div className="meta">VENTANA <b>{ventanaState}</b></div>
+            </header>
+            <div className="msec-body">
 
-          <div className="np-row-2">
-            <label className="np-label">
-              <span className="np-label-tx">Fecha de publicación</span>
-              <input
-                type="datetime-local"
-                className="np-input"
-                step="300"
-                value={fechaPublicacion}
-                onChange={(e) => setFechaPublicacion(e.target.value)}
-              />
-            </label>
-            <label className="np-label">
-              <span className="np-label-tx">URL publicación</span>
-              <input
-                type="url"
-                className="np-input"
-                value={urlPublicacion}
-                onChange={(e) => setUrlPublicacion(e.target.value)}
-                placeholder="https://…"
-              />
-            </label>
-          </div>
+              <div className="mrow">
+                <div className="mfield">
+                  <label>Fecha · hora de publicación</label>
+                  <div className="minput">
+                    <input
+                      type="datetime-local"
+                      step="300"
+                      value={fechaPublicacion}
+                      onChange={(e) => setFechaPublicacion(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="mfield">
+                  <label>URL de publicación <span className="hint">· cuando esté viva</span></label>
+                  <div className="minput">
+                    <input
+                      type="url"
+                      value={urlPublicacion}
+                      onChange={(e) => setUrlPublicacion(e.target.value)}
+                      placeholder="https://…"
+                    />
+                  </div>
+                </div>
+              </div>
 
-          <label className="np-label">
-            <span className="np-label-tx">Notas internas</span>
-            <textarea
-              className="np-textarea"
-              value={notasInternas}
-              onChange={(e) => setNotasInternas(e.target.value)}
-              placeholder="Notas de producción, referencias, lo que sea…"
-              rows={4}
-            />
-          </label>
+              <div className="mfield">
+                <label>Notas internas <span className="hint">· producción, referencias, lo que sea</span></label>
+                <div className="minput notes">
+                  <textarea
+                    value={notas}
+                    onChange={(e) => setNotas(e.target.value)}
+                    placeholder="Notas, referencias, decisiones tomadas…"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
         </div>
 
-        <footer className="cm-foot">
-          <button type="button" className="cm-btn" onClick={onClose} disabled={saving}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="cm-btn cm-btn-primary"
-            onClick={handleSave}
-            disabled={saving || !titulo.trim()}
-          >
-            {saving ? "Guardando…" : "Guardar pieza"}
-          </button>
+        {/* ─── FOOTER ─── */}
+        <footer className="somal-foot">
+          <div className="l">
+            <span><span className="led"></span>DRAFT · <b>{draftState}</b></span>
+            <span>· <b>{wordCount}</b> / 500 W</span>
+            <span>· REQUERIDOS <b className={requeridosLeft > 0 ? "warn" : "pos"}>{requeridosLeft}</b></span>
+            <span>· AUTOGUARDA EN <b>00:{String(autosaveSec).padStart(2, "0")}</b></span>
+          </div>
+          <div className="r">
+            <button type="button" className="somal-btn ghost" onClick={onClose} disabled={saving}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="somal-btn primary"
+              onClick={handleSave}
+              disabled={saving || requeridosLeft > 0}
+            >
+              {saving ? "Guardando…" : "Guardar pieza →"}
+            </button>
+          </div>
         </footer>
       </div>
     </div>
   );
 }
+
+// ─── Helpers ────────────────────────────────────────────────────
+
+function formatClock(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function countWords(html) {
+  if (!html) return 0;
+  // Quitar tags HTML, normalizar espacios
+  const txt = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return txt ? txt.split(/\s+/).length : 0;
+}
+
+function getEditorText(formato, contenido) {
+  if (formato === "email") return contenido.cuerpo || "";
+  if (formato === "youtube") return contenido.guion || "";
+  return contenido.texto || "";
+}
+
+function anyFilled(titulo, contenido, urlPublicacion, notas) {
+  if (titulo.trim()) return true;
+  if (urlPublicacion.trim()) return true;
+  if (notas.trim()) return true;
+  if (Object.values(contenido).some((v) => v && String(v).trim())) return true;
+  return false;
+}
+
+// ─── Campos de contenido por formato ────────────────────────────
+
+function ContenidoFields({ formato, contenido, setContenido, editorRef }) {
+  function setField(key, value) {
+    setContenido({ ...contenido, [key]: value });
+  }
+
+  if (formato === "email") {
+    return (
+      <>
+        <div className="mfield">
+          <label>Asunto <span className="hint">· la línea que abre o no la abre</span></label>
+          <div className="minput">
+            <input
+              type="text"
+              value={contenido.asunto || ""}
+              onChange={(e) => setField("asunto", e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Preheader <span className="hint">· lo que se ve en la bandeja</span></label>
+          <div className="minput">
+            <input
+              type="text"
+              value={contenido.preheader || ""}
+              onChange={(e) => setField("preheader", e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Cuerpo <span className="hint">· objetivo ~500 palabras</span></label>
+          <MeditorEditor
+            html={contenido.cuerpo || ""}
+            onChange={(html) => setField("cuerpo", html)}
+            placeholder="Escribe aquí…"
+            ref={editorRef}
+          />
+        </div>
+      </>
+    );
+  }
+
+  if (formato === "youtube") {
+    return (
+      <>
+        <div className="mfield">
+          <label>Título del vídeo</label>
+          <div className="minput">
+            <input
+              type="text"
+              value={contenido.titulo_video || ""}
+              onChange={(e) => setField("titulo_video", e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Descripción</label>
+          <div className="minput notes">
+            <textarea
+              value={contenido.descripcion || ""}
+              onChange={(e) => setField("descripcion", e.target.value)}
+              placeholder="Descripción del vídeo…"
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Guion <span className="hint">· ~7 min</span></label>
+          <MeditorEditor
+            html={contenido.guion || ""}
+            onChange={(html) => setField("guion", html)}
+            placeholder="Escribe el guion aquí…"
+            ref={editorRef}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // reel / relampago / grieta
+  return (
+    <div className="mfield">
+      <label>Texto</label>
+      <MeditorEditor
+        html={contenido.texto || ""}
+        onChange={(html) => setField("texto", html)}
+        placeholder="Escribe aquí…"
+        ref={editorRef}
+      />
+    </div>
+  );
+}
+
+// ─── Editor inline contentEditable con toolbar HUD ───────────────
+
+const MeditorEditor = forwardRef(function MeditorEditor({ html, onChange, placeholder }, ref) {
+  const areaRef = useRef(null);
+  const initializedRef = useRef(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!initializedRef.current && areaRef.current) {
+      areaRef.current.innerHTML = html || "";
+      initializedRef.current = true;
+    }
+  }, [html]);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => areaRef.current?.focus(),
+  }));
+
+  function exec(cmd, arg) {
+    document.execCommand(cmd, false, arg);
+    if (areaRef.current) onChange(areaRef.current.innerHTML);
+    areaRef.current?.focus();
+  }
+  function handleInput() {
+    if (areaRef.current) onChange(areaRef.current.innerHTML);
+  }
+  function handlePaste(e) {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
+  }
+
+  return (
+    <div className={`meditor ${expanded ? "expanded" : ""}`}>
+      <div className="meditor-toolbar">
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("bold"); }}><b>B</b></button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("italic"); }}><i>I</i></button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("formatBlock", "<h1>"); }}>H1</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("formatBlock", "<h2>"); }}>H2</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("insertUnorderedList"); }}>≡</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("undo"); }}>↶</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("insertHorizontalRule"); }}>—</button>
+        <span className="tb-spc"></span>
+        <span className="tb-info">MONO ↔ PROSA</span>
+        <button type="button" className="tb" onClick={() => setExpanded((v) => !v)} title={expanded ? "Reducir" : "Expandir"}>⤢</button>
+      </div>
+      <div
+        ref={areaRef}
+        className="meditor-area"
+        contentEditable
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onPaste={handlePaste}
+        data-placeholder={placeholder}
+      />
+    </div>
+  );
+});
