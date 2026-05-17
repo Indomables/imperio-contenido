@@ -845,3 +845,44 @@
   background: transparent; color: var(--ink-4); border-color: var(--line);
   box-shadow: none; cursor: not-allowed;
 }
+
+/* Variante destructiva del botón principal del modal — rojo terminal.
+   Usado en ConfirmModal para acciones irreversibles (eliminar, etc). */
+.somal-btn.danger {
+  background: transparent;
+  color: oklch(0.70 0.22 25);
+  border-color: oklch(0.70 0.22 25 / 0.55);
+  box-shadow: 0 0 12px oklch(0.70 0.22 25 / 0.20);
+  position: relative;
+}
+.somal-btn.danger:hover {
+  background: oklch(0.70 0.22 25 / 0.10);
+  border-color: oklch(0.70 0.22 25);
+  box-shadow: 0 0 18px oklch(0.70 0.22 25 / 0.40);
+  transform: translateY(-1px);
+}
+.somal-btn.danger:active { transform: translateY(1px); }
+.somal-btn.danger[disabled] {
+  background: transparent; color: var(--ink-4); border-color: var(--line);
+  box-shadow: none; cursor: not-allowed;
+}
+
+/* LED rojo (para títulos destructivos del header de ConfirmModal) */
+.somal-h .led.led-danger {
+  background: oklch(0.70 0.22 25);
+  box-shadow: 0 0 12px oklch(0.70 0.22 25 / 0.55);
+}
+
+/* ConfirmModal — más compacto que el somal estándar */
+.somal-confirm {
+  width: 520px;
+}
+.somal-confirm-body {
+  padding: 22px 24px 18px;
+}
+.somal-confirm-msg {
+  margin: 0;
+  font-family: var(--sans); font-size: 14px;
+  color: var(--ink-2); line-height: 1.55;
+  letter-spacing: -0.005em;
+}

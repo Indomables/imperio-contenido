@@ -25,6 +25,7 @@ import {
   capture as captureApi,
 } from "../lib/api";
 import CardModal from "../components/CardModal";
+import ConfirmModal from "../components/ConfirmModal";
 import NuevaIdeaModal from "../components/NuevaIdeaModal";
 import NuevaPiezaModal from "../components/NuevaPiezaModal";
 import KitIdModal from "../components/KitIdModal";
@@ -163,6 +164,11 @@ export default function Tablero() {
   // hacer click sobre el contador "N piezas" en las cards de Ideas.
   // Guarda el id de la idea cuya lista de piezas está visible.
   const [piezasPopoverIdeaId, setPiezasPopoverIdeaId] = useState(null);
+  // Modal de confirmación para eliminaciones. `confirmDel` guarda
+  // { kind, id, label } cuando hay una acción pendiente de confirmar.
+  // Reemplaza window.confirm() porque Chromium permite al usuario
+  // marcar "Impedir más diálogos" y dejarlos no operativos en silencio.
+  const [confirmDel, setConfirmDel] = useState(null);
 
   const reload = useCallback(async () => {
     try {
@@ -349,8 +355,9 @@ export default function Tablero() {
     }
   }
 
+  // Borrado puro — sin confirmación. La UI (ConfirmModal) ya se ha
+  // encargado de confirmar antes de llamar a esta función.
   async function handleDelete(kind, id) {
-    if (!confirm("¿Eliminar? Esta acción no se puede deshacer.")) return;
     if (kind === "idea") {
       await ideasApi.remove(id);
       setIdeas((arr) => arr.filter((x) => x.id !== id));
@@ -518,9 +525,11 @@ export default function Tablero() {
                         title="Eliminar idea"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm(`¿Eliminar la idea "${idea.titulo || "(sin título)"}"?`)) {
-                            handleDelete("idea", idea.id);
-                          }
+                          setConfirmDel({
+                            kind: "idea",
+                            id: idea.id,
+                            label: idea.titulo || "(sin título)",
+                          });
                         }}
                       >✕</button>
                     </div>
@@ -724,9 +733,11 @@ export default function Tablero() {
                             title="Eliminar"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (window.confirm(`¿Eliminar la pieza "${p.titulo || "(sin título)"}"?`)) {
-                                handleDelete("pieza", p.id);
-                              }
+                              setConfirmDel({
+                                kind: "pieza",
+                                id: p.id,
+                                label: p.titulo || "(sin título)",
+                              });
                             }}
                           >✕</button>
                         </div>
@@ -805,6 +816,24 @@ export default function Tablero() {
           onClose={() => setMetricasModalPieza(null)}
         />
       )}
+
+      <ConfirmModal
+        open={!!confirmDel}
+        title={confirmDel?.kind === "idea" ? "ELIMINAR IDEA" : "ELIMINAR PIEZA"}
+        message={
+          confirmDel
+            ? `Vas a eliminar "${confirmDel.label}". Esta acción no se puede deshacer.`
+            : ""
+        }
+        confirmLabel="Eliminar"
+        variant="danger"
+        onConfirm={async () => {
+          if (!confirmDel) return;
+          await handleDelete(confirmDel.kind, confirmDel.id);
+          setConfirmDel(null);
+        }}
+        onCancel={() => setConfirmDel(null)}
+      />
     </>
   );
 }
