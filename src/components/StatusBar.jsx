@@ -58,7 +58,7 @@ export default function StatusBar() {
     <div className="contenido-statusbar">
       <div className="l">
         <span>
-          <span className="led"></span> IMPERIO·CONTENIDO <b>v0.54.0</b>
+          <span className="led"></span> IMPERIO·CONTENIDO <b>v0.55.0</b>
         </span>
         {leftItems.map((item, idx) => (
           <StatusItem key={`l-${idx}`} item={item} />

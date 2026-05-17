@@ -13,7 +13,8 @@
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { piezas as piezasApi } from "../lib/api";
-import { snapTo5Min, toDatetimeLocal } from "../lib/datetime";
+import { formatDateTimeLocal } from "../lib/datetime";
+import DateTimePicker from "./DateTimePicker";
 
 const FORMATOS = [
   { val: "email",     label: "Email"     },
@@ -34,6 +35,7 @@ export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, idea
   const [saving, setSaving] = useState(false);
   const [clockNow, setClockNow] = useState(formatClock(new Date()));
   const [autosaveSec, setAutosaveSec] = useState(24);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const tituloRef = useRef(null);
   const editorRef = useRef(null);
 
@@ -111,6 +113,7 @@ export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, idea
     : `NUEVA · DESDE CERO`;
 
   return (
+    <>
     <div className="modal-host" onClick={onClose}>
       <div className="modal-scrim" />
       <div className="somal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="somalTitle">
@@ -245,21 +248,24 @@ export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, idea
               <div className="mrow">
                 <div className="mfield">
                   <label>Fecha · hora de publicación</label>
-                  <div className="minput">
-                    <input
-                      type="datetime-local"
-                      step="300"
-                      value={fechaPublicacion}
-                      onChange={(e) => {
-                        if (!e.target.value) {
-                          setFechaPublicacion("");
-                          return;
-                        }
-                        const snapped = snapTo5Min(e.target.value);
-                        setFechaPublicacion(snapped ? toDatetimeLocal(snapped) : "");
-                      }}
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    className="minput minput-trigger"
+                    onClick={() => setPickerOpen(true)}
+                  >
+                    <span className={`minput-trigger-label ${fechaPublicacion ? "" : "is-placeholder"}`}>
+                      {fechaPublicacion
+                        ? formatDateTimeLocal(fechaPublicacion)
+                        : "DD / MM / YYYY · HH:MM"}
+                    </span>
+                    <span className="ico-cal" aria-hidden="true">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                        <rect x="2.5" y="3.5" width="11" height="10" />
+                        <path d="M2.5 6.5h11" />
+                        <path d="M5.5 2v3M10.5 2v3" />
+                      </svg>
+                    </span>
+                  </button>
                 </div>
                 <div className="mfield">
                   <label>URL de publicación <span className="hint">· cuando esté viva</span></label>
@@ -313,6 +319,18 @@ export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, idea
         </footer>
       </div>
     </div>
+    {pickerOpen && (
+      <DateTimePicker
+        open={pickerOpen}
+        value={fechaPublicacion || null}
+        onConfirm={(d) => {
+          setFechaPublicacion(d ? d.toISOString() : "");
+          setPickerOpen(false);
+        }}
+        onCancel={() => setPickerOpen(false)}
+      />
+    )}
+    </>
   );
 }
 

@@ -20,7 +20,8 @@
  */
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
-import { snapTo5Min, toDatetimeLocal } from "../lib/datetime";
+import { formatDateTimeLocal } from "../lib/datetime";
+import DateTimePicker from "./DateTimePicker";
 
 const FORMATO_LABEL = {
   email:     "EMAIL",
@@ -37,6 +38,7 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
   const [draft, setDraft] = useState(() => initialDraft(kind, data));
   const [saving, setSaving] = useState(false);
   const [clockNow, setClockNow] = useState(formatClock(new Date()));
+  const [pickerOpen, setPickerOpen] = useState(false);
   const tituloRef = useRef(null);
   const editorRef = useRef(null);
 
@@ -96,6 +98,7 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
   const headerCrumb = `«${(data.titulo || "SIN TÍTULO").toUpperCase()}»`;
 
   return (
+    <>
     <div className="modal-host" onClick={onClose}>
       <div className="modal-scrim" />
       <div className="somal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="somalTitle">
@@ -154,6 +157,18 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
         </footer>
       </div>
     </div>
+    {pickerOpen && (
+      <DateTimePicker
+        open={pickerOpen}
+        value={draft.fecha_publicacion}
+        onConfirm={(d) => {
+          setField("fecha_publicacion", d ? d.toISOString() : null);
+          setPickerOpen(false);
+        }}
+        onCancel={() => setPickerOpen(false)}
+      />
+    )}
+    </>
   );
 }
 
@@ -286,21 +301,24 @@ function PiezaSections({ draft, setField, setContenidoField, tituloRef, editorRe
           <div className="mrow">
             <div className="mfield">
               <label>Fecha · hora de publicación</label>
-              <div className="minput">
-                <input
-                  type="datetime-local"
-                  step="300"
-                  value={toDatetimeLocal(draft.fecha_publicacion)}
-                  onChange={(e) => {
-                    if (!e.target.value) {
-                      setField("fecha_publicacion", null);
-                      return;
-                    }
-                    const snapped = snapTo5Min(e.target.value);
-                    setField("fecha_publicacion", snapped ? snapped.toISOString() : null);
-                  }}
-                />
-              </div>
+              <button
+                type="button"
+                className="minput minput-trigger"
+                onClick={() => setPickerOpen(true)}
+              >
+                <span className={`minput-trigger-label ${draft.fecha_publicacion ? "" : "is-placeholder"}`}>
+                  {draft.fecha_publicacion
+                    ? formatDateTimeLocal(draft.fecha_publicacion)
+                    : "DD / MM / YYYY · HH:MM"}
+                </span>
+                <span className="ico-cal" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                    <rect x="2.5" y="3.5" width="11" height="10" />
+                    <path d="M2.5 6.5h11" />
+                    <path d="M5.5 2v3M10.5 2v3" />
+                  </svg>
+                </span>
+              </button>
             </div>
             <div className="mfield">
               <label>URL de publicación <span className="hint">· cuando esté viva</span></label>

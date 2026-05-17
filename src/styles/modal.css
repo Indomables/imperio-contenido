@@ -710,6 +710,41 @@
 }
 .minput input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
+/* ─── DATETIME TRIGGER (botón que abre el DateTimePicker custom) ─── */
+/* Reemplaza al <input type="datetime-local"> nativo. Hereda casi todo
+   de .minput; solo overrides para que un <button> se vea idéntico. */
+button.minput.minput-trigger {
+  width: 100%;
+  font-family: var(--sans); font-size: 14px;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  text-align: left;
+  cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+}
+button.minput.minput-trigger:focus { outline: 0; }
+button.minput.minput-trigger:focus-visible {
+  border-color: oklch(from var(--acc) l c h / 0.50);
+  background: oklch(from var(--acc) l c h / 0.03);
+  box-shadow: 0 0 0 1px oklch(from var(--acc) l c h / 0.50), 0 0 14px oklch(from var(--acc) l c h / 0.10);
+}
+.minput-trigger-label {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.minput-trigger-label.is-placeholder { color: var(--ink-5); }
+.minput-trigger .ico-cal {
+  margin-left: auto;
+  width: 16px; height: 16px;
+  color: var(--ink-4);
+  display: grid; place-items: center;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+button.minput.minput-trigger:hover .ico-cal { color: var(--acc); }
+.minput-trigger .ico-cal svg { width: 14px; height: 14px; }
+
 /* ─── CHIPS (format + lista) ───────────────────────────── */
 .mchips { display: flex; gap: 6px; flex-wrap: wrap; }
 .mchip {

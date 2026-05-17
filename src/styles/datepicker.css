@@ -1,0 +1,255 @@
+/* DATE · TIME PICKER · Imperio Contenido — Soma OS HUD
+   Calendario + hora + minuto (paso 5)
+   Depende de: soma.css (tokens, ledPulse), modal.css (.somal-btn, .somal-x)
+   ──────────────────────────────────────────────────── */
+
+.dp-host {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  z-index: 1000;
+  padding: 32px;
+}
+.dp-scrim {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, oklch(0.07 0.012 235 / 0.80), oklch(0.05 0.010 235 / 0.92));
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+/* Faded board silhouette behind, same vibe as the modal */
+.dp-host-bg {
+  position: absolute; inset: 0;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  padding: 70px 32px 60px;
+  opacity: 0.12;
+  pointer-events: none;
+}
+.dp-host-bg .g-col {
+  background: linear-gradient(180deg, var(--bg-1), oklch(0.125 0.014 235));
+  border: 1px solid var(--line);
+}
+
+/* ─── MAIN FRAME ───────────────────────────────────────── */
+.dpick {
+  position: relative;
+  width: 760px;
+  background: linear-gradient(180deg, var(--bg-1), var(--bg));
+  border: 1px solid var(--line-2);
+  display: flex; flex-direction: column;
+  font-family: var(--sans);
+  color: var(--ink);
+  z-index: 1;
+  animation: somalIn 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.dpick::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, oklch(1 0 0 / 0.012) 2px 3px);
+  mix-blend-mode: screen;
+}
+
+/* chasis */
+.dpick > .s-br {
+  position: absolute; width: 12px; height: 12px;
+  border: 1px solid var(--line-3); pointer-events: none;
+}
+.dpick > .s-br.tl { top: -1px; left: -1px;  border-right: 0; border-bottom: 0; }
+.dpick > .s-br.tr { top: -1px; right: -1px; border-left: 0;  border-bottom: 0; }
+.dpick > .s-br.bl { bottom: -1px; left: -1px;  border-right: 0; border-top: 0; }
+.dpick > .s-br.br { bottom: -1px; right: -1px; border-left: 0;  border-top: 0; }
+.dpick > .s-screw {
+  position: absolute; width: 4px; height: 4px; background: var(--line-3);
+  pointer-events: none;
+}
+.dpick > .s-screw.tl { top: 7px;    left: 7px;    }
+.dpick > .s-screw.tr { top: 7px;    right: 7px;   }
+.dpick > .s-screw.bl { bottom: 7px; left: 7px;    }
+.dpick > .s-screw.br { bottom: 7px; right: 7px;   }
+
+/* ─── HEADER ───────────────────────────────────────────── */
+.dp-h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-1), var(--bg));
+}
+.dp-h .l { display: flex; align-items: center; gap: 10px; }
+.dp-h .led {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--acc); box-shadow: var(--acc-glow);
+  animation: ledPulse 1.6s ease-in-out infinite;
+}
+.dp-h .ix   { font-family: var(--mono); font-size: 10px; color: var(--ink-4); letter-spacing: 0.20em; }
+.dp-h .div  { font-family: var(--mono); font-size: 10px; color: var(--ink-5); }
+.dp-h .ttl  { font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--ink); letter-spacing: 0.22em; text-transform: uppercase; }
+
+/* ─── BODY (3 columnas) ────────────────────────────────── */
+.dp-body {
+  display: grid;
+  grid-template-columns: 1fr 96px 96px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ─── CALENDAR (izquierda) ─────────────────────────────── */
+.dp-cal {
+  padding: 16px 18px;
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.dp-cal-h {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+}
+.dp-cal-h .navbtn {
+  width: 28px; height: 28px;
+  background: transparent; border: 1px solid var(--line);
+  color: var(--ink-3);
+  font-family: var(--mono); font-size: 16px; line-height: 1;
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.dp-cal-h .navbtn:hover { color: var(--acc); border-color: var(--acc); background: var(--acc-bg2); box-shadow: var(--acc-glow); }
+.dp-cal-h .monthlbl {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink); font-weight: 500;
+  flex: 1; text-align: center;
+}
+.dp-cal-h .monthlbl b { color: var(--ink); }
+.dp-cal-h .monthlbl small {
+  display: block; font-family: var(--mono); font-size: 8.5px;
+  color: var(--ink-5); letter-spacing: 0.22em; margin-top: 3px;
+}
+
+.dp-week {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line);
+}
+.dp-week span {
+  font-family: var(--mono); font-size: 9px;
+  color: var(--ink-4); letter-spacing: 0.18em; text-transform: uppercase;
+  text-align: center;
+}
+
+.dp-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.dp-day {
+  background: transparent; border: 1px solid transparent;
+  color: var(--ink-2);
+  font-family: var(--mono); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  height: 34px;
+  cursor: pointer;
+  transition: color 0.10s, border-color 0.10s, background 0.10s;
+  position: relative;
+}
+.dp-day:hover { color: var(--acc); border-color: var(--line-2); }
+.dp-day.off { color: var(--ink-5); }
+.dp-day.today {
+  border: 1px dashed var(--line-3);
+  color: var(--ink);
+}
+.dp-day.today::after {
+  content: ""; position: absolute;
+  bottom: 3px; left: 50%; transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--ink-4);
+}
+.dp-day.on {
+  color: var(--acc);
+  background: oklch(from var(--acc) l c h / 0.08);
+  border-color: oklch(from var(--acc) l c h / 0.50);
+  box-shadow: 0 0 12px oklch(from var(--acc) l c h / 0.20), inset 0 0 6px oklch(from var(--acc) l c h / 0.10);
+}
+.dp-day.on::after { background: var(--acc); box-shadow: var(--acc-glow); }
+
+/* ─── LISTS (hora + min) ───────────────────────────────── */
+.dp-list {
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--line);
+  position: relative;
+}
+.dp-list:last-child { border-right: 0; }
+.dp-list-h {
+  padding: 10px 0;
+  font-family: var(--mono); font-size: 9.5px;
+  color: var(--ink-4); letter-spacing: 0.24em; text-transform: uppercase;
+  text-align: center;
+  border-bottom: 1px dashed var(--line);
+}
+.dp-list-body {
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  scroll-behavior: smooth;
+  position: relative;
+  height: 312px;
+}
+.dp-list-body::-webkit-scrollbar { width: 6px; }
+.dp-list-body::-webkit-scrollbar-thumb { background: var(--bg-3); }
+.dp-list-body::-webkit-scrollbar-track { background: transparent; }
+/* fade top + bottom so it reads like an instrument dial */
+.dp-list::before,
+.dp-list::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 28px;
+  pointer-events: none; z-index: 2;
+}
+.dp-list::before { top: 32px;    background: linear-gradient(180deg, var(--bg-1), transparent); }
+.dp-list::after  { bottom: 0; background: linear-gradient(0deg, var(--bg-1), transparent); }
+
+.dp-item {
+  background: transparent; border: 0;
+  color: var(--ink-3);
+  font-family: var(--mono); font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  padding: 9px 0;
+  cursor: pointer;
+  text-align: center;
+  transition: color 0.10s, background 0.10s;
+  position: relative;
+  border-top: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+.dp-item:hover { color: var(--ink); background: oklch(1 0 0 / 0.02); }
+.dp-item.on {
+  color: var(--acc);
+  background: oklch(from var(--acc) l c h / 0.10);
+  border-top-color: oklch(from var(--acc) l c h / 0.45);
+  border-bottom-color: oklch(from var(--acc) l c h / 0.45);
+  box-shadow: inset 0 0 14px oklch(from var(--acc) l c h / 0.10);
+  font-weight: 500;
+}
+
+/* ─── FOOTER ───────────────────────────────────────────── */
+.dp-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px;
+  padding: 12px 20px;
+}
+.dp-foot .l {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 9.5px;
+  color: var(--ink-4); letter-spacing: 0.20em; text-transform: uppercase;
+  flex-wrap: wrap;
+}
+.dp-foot .l .led {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--acc); box-shadow: var(--acc-glow);
+  animation: ledPulse 1.6s ease-in-out infinite;
+  display: inline-block; margin-right: 6px; vertical-align: 1px;
+}
+.dp-foot .l b {
+  color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums;
+  letter-spacing: 0.20em;
+}
+.dp-foot .r { display: flex; gap: 8px; }
+
+/* Helper button reset for consistency with modal */
+.dp-btn-link {
+  background: transparent; border: 0;
+  color: var(--ink-3);
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+  cursor: pointer; font-weight: 500;
+  padding: 8px 10px;
+}
+.dp-btn-link:hover { color: var(--acc); }

@@ -1,0 +1,302 @@
+/**
+ * DateTimePicker — Calendar + hora + minutos (paso 5) en HUD Soma OS.
+ *
+ * Reemplaza al <input type="datetime-local"> nativo del browser.
+ * Markup y CSS portados 1:1 del handoff de Claude Design
+ * (handoff-datepicker/).
+ *
+ * Características:
+ *   · Semana empieza en lunes (notación española: L M X J V S D)
+ *   · Mes en mayúsculas largo (MAYO 2026), días abreviados en footer (LUN)
+ *   · Hora 24h, minutos solo cada 5 (00, 05, 10, ..., 55)
+ *   · Botones Limpiar / Hoy / Confirmar
+ *   · Auto-scroll a la hora y minuto seleccionados al abrir
+ *   · Esc o × cancela sin aplicar cambios
+ *
+ * Props:
+ *   open      — boolean, si está abierto
+ *   value     — Date | null | ISO string. Valor inicial.
+ *   onConfirm — (date | null) => void. Se llama al confirmar.
+ *   onCancel  — () => void. Se llama al cerrar sin confirmar (Esc, ×).
+ */
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const MONTHS_LONG  = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"];
+const MONTHS_SHORT = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
+const WDAY_SHORT   = ["DOM","LUN","MAR","MIÉ","JUE","VIE","SÁB"];
+
+const pad = (n) => String(n).padStart(2, "0");
+
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+function snapMinutesTo5(min) {
+  return Math.round(min / 5) * 5;
+}
+
+// Construye state inicial a partir de `value` (Date | null | string).
+function buildInitialState(value) {
+  const t = new Date();
+  if (!value) {
+    let mi = snapMinutesTo5(t.getMinutes());
+    let h  = t.getHours();
+    if (mi >= 60) { mi = 0; h = (h + 1) % 24; }
+    return { y: t.getFullYear(), m: t.getMonth(), d: null, h, mi, viewY: t.getFullYear(), viewM: t.getMonth() };
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) {
+    return { y: t.getFullYear(), m: t.getMonth(), d: null, h: t.getHours(), mi: snapMinutesTo5(t.getMinutes()) % 60, viewY: t.getFullYear(), viewM: t.getMonth() };
+  }
+  let mi = snapMinutesTo5(d.getMinutes());
+  let h  = d.getHours();
+  if (mi >= 60) { mi = 0; h = (h + 1) % 24; }
+  return {
+    y: d.getFullYear(),
+    m: d.getMonth(),
+    d: d.getDate(),
+    h,
+    mi,
+    viewY: d.getFullYear(),
+    viewM: d.getMonth(),
+  };
+}
+
+export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
+  const [state, setState] = useState(() => buildInitialState(value));
+  const hListRef = useRef(null);
+  const mListRef = useRef(null);
+
+  // Resetear estado cada vez que se abra (o cambie el valor inicial)
+  useEffect(() => {
+    if (open) setState(buildInitialState(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // ESC cancela
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onCancel?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  // Auto-scroll a la hora y minuto seleccionados cuando se abre
+  useEffect(() => {
+    if (!open) return;
+    const tid = setTimeout(() => {
+      [hListRef.current, mListRef.current].forEach((body) => {
+        if (!body) return;
+        const on = body.querySelector(".dp-item.on");
+        if (on) body.scrollTop = on.offsetTop - body.clientHeight / 2 + on.offsetHeight / 2;
+      });
+    }, 30);
+    return () => clearTimeout(tid);
+  }, [open, state.h, state.mi]);
+
+  // ── Render del calendario ──
+  const calendarDays = useMemo(() => {
+    const days = [];
+    const firstOfMonth = new Date(state.viewY, state.viewM, 1);
+    let dow = firstOfMonth.getDay();
+    dow = dow === 0 ? 6 : dow - 1; // Monday-first
+    const daysInMonth = new Date(state.viewY, state.viewM + 1, 0).getDate();
+    const daysPrev    = new Date(state.viewY, state.viewM, 0).getDate();
+    const today = new Date();
+
+    for (let i = 0; i < 42; i++) {
+      let dayNum, monthOffset;
+      if (i < dow) {
+        dayNum = daysPrev - (dow - i - 1); monthOffset = -1;
+      } else if (i - dow + 1 > daysInMonth) {
+        dayNum = i - dow + 1 - daysInMonth; monthOffset = +1;
+      } else {
+        dayNum = i - dow + 1; monthOffset = 0;
+      }
+      const cellY = state.viewY + (monthOffset === -1 && state.viewM === 0 ? -1 : 0);
+      const cellM = (state.viewM + monthOffset + 12) % 12;
+      const cellDate = new Date(cellY, cellM, dayNum);
+      const isToday = cellDate.getFullYear() === today.getFullYear() &&
+                      cellDate.getMonth()    === today.getMonth() &&
+                      cellDate.getDate()     === today.getDate();
+      const isOn    = monthOffset === 0 && state.d !== null &&
+                      dayNum === state.d && state.viewY === state.y && state.viewM === state.m;
+      days.push({ dayNum, monthOffset, isToday, isOn });
+    }
+    return days;
+  }, [state.viewY, state.viewM, state.d, state.y, state.m]);
+
+  const weekRange = useMemo(() => {
+    const firstOfMonth = new Date(state.viewY, state.viewM, 1);
+    let dow = firstOfMonth.getDay();
+    dow = dow === 0 ? 6 : dow - 1;
+    const firstVisible = new Date(state.viewY, state.viewM, 1 - dow);
+    const lastVisible  = new Date(state.viewY, state.viewM, 1 - dow + 41);
+    return `W${pad(getISOWeek(firstVisible))} — W${pad(getISOWeek(lastVisible))}`;
+  }, [state.viewY, state.viewM]);
+
+  const selOut = useMemo(() => {
+    if (state.d === null) return "—";
+    const d = new Date(state.y, state.m, state.d);
+    const wd = WDAY_SHORT[d.getDay()];
+    return `${wd} · ${pad(state.d)} ${MONTHS_SHORT[state.m]} ${state.y} · ${pad(state.h)}:${pad(state.mi)}`;
+  }, [state.y, state.m, state.d, state.h, state.mi]);
+
+  if (!open) return null;
+
+  // ── Handlers ──
+  function handleDayClick(dayNum, monthOffset) {
+    setState((s) => {
+      let nm = s.viewM + monthOffset;
+      let ny = s.viewY;
+      if (nm < 0)  { nm = 11; ny--; }
+      if (nm > 11) { nm = 0;  ny++; }
+      return { ...s, d: dayNum, y: ny, m: nm, viewM: nm, viewY: ny };
+    });
+  }
+  function prevMonth() {
+    setState((s) => {
+      let nm = s.viewM - 1, ny = s.viewY;
+      if (nm < 0) { nm = 11; ny--; }
+      return { ...s, viewM: nm, viewY: ny };
+    });
+  }
+  function nextMonth() {
+    setState((s) => {
+      let nm = s.viewM + 1, ny = s.viewY;
+      if (nm > 11) { nm = 0; ny++; }
+      return { ...s, viewM: nm, viewY: ny };
+    });
+  }
+  function handleToday() {
+    const t = new Date();
+    let mi = snapMinutesTo5(t.getMinutes());
+    let h  = t.getHours();
+    if (mi >= 60) { mi = 0; h = (h + 1) % 24; }
+    setState({
+      y: t.getFullYear(), m: t.getMonth(), d: t.getDate(),
+      h, mi,
+      viewY: t.getFullYear(), viewM: t.getMonth(),
+    });
+  }
+  function handleClear() {
+    setState((s) => ({ ...s, d: null }));
+  }
+  function handleConfirm() {
+    if (state.d === null) {
+      onConfirm?.(null);
+      return;
+    }
+    const result = new Date(state.y, state.m, state.d, state.h, state.mi, 0, 0);
+    onConfirm?.(result);
+  }
+
+  return (
+    <div className="dp-host" onClick={onCancel}>
+      <div className="dp-scrim" aria-hidden="true"></div>
+      <div className="dpick" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="dpTitle">
+
+        {/* Chasis */}
+        <span className="s-br tl"></span><span className="s-br tr"></span>
+        <span className="s-br bl"></span><span className="s-br br"></span>
+        <span className="s-screw tl"></span><span className="s-screw tr"></span>
+        <span className="s-screw bl"></span><span className="s-screw br"></span>
+
+        {/* HEADER */}
+        <header className="dp-h">
+          <div className="l">
+            <span className="led"></span>
+            <span className="ix">00</span><span className="div">/</span>
+            <span className="ttl" id="dpTitle">Fecha · Hora de Publicación</span>
+          </div>
+          <button type="button" className="somal-x" onClick={onCancel} aria-label="Cerrar (ESC)">×</button>
+        </header>
+
+        {/* BODY */}
+        <div className="dp-body">
+
+          {/* CALENDARIO */}
+          <section className="dp-cal">
+            <div className="dp-cal-h">
+              <button type="button" className="navbtn" onClick={prevMonth} aria-label="Mes anterior">‹</button>
+              <div className="monthlbl">
+                <b>{MONTHS_LONG[state.viewM]} {state.viewY}</b>
+                <small>{weekRange}</small>
+              </div>
+              <button type="button" className="navbtn" onClick={nextMonth} aria-label="Mes siguiente">›</button>
+            </div>
+            <div className="dp-week" aria-hidden="true">
+              <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+            </div>
+            <div className="dp-grid">
+              {calendarDays.map((c, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`dp-day ${c.monthOffset !== 0 ? "off" : ""} ${c.isToday ? "today" : ""} ${c.isOn ? "on" : ""}`}
+                  onClick={() => handleDayClick(c.dayNum, c.monthOffset)}
+                >
+                  {c.dayNum}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* HORA */}
+          <section className="dp-list">
+            <div className="dp-list-h">Hora</div>
+            <div className="dp-list-body" ref={hListRef}>
+              {Array.from({ length: 24 }, (_, h) => (
+                <button
+                  key={h}
+                  type="button"
+                  className={`dp-item ${h === state.h ? "on" : ""}`}
+                  onClick={() => setState((s) => ({ ...s, h }))}
+                >
+                  {pad(h)}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* MINUTOS (paso 5) */}
+          <section className="dp-list">
+            <div className="dp-list-h">Minutos</div>
+            <div className="dp-list-body" ref={mListRef}>
+              {Array.from({ length: 12 }, (_, idx) => idx * 5).map((mi) => (
+                <button
+                  key={mi}
+                  type="button"
+                  className={`dp-item ${mi === state.mi ? "on" : ""}`}
+                  onClick={() => setState((s) => ({ ...s, mi }))}
+                >
+                  {pad(mi)}
+                </button>
+              ))}
+            </div>
+          </section>
+
+        </div>
+
+        {/* FOOTER */}
+        <footer className="dp-foot">
+          <div className="l">
+            <span><span className="led"></span>SELECCIONADO</span>
+            <b>{selOut}</b>
+          </div>
+          <div className="r">
+            <button type="button" className="dp-btn-link" onClick={handleClear}>Limpiar</button>
+            <button type="button" className="dp-btn-link" onClick={handleToday}>Hoy</button>
+            <button type="button" className="somal-btn primary" onClick={handleConfirm}>Confirmar</button>
+          </div>
+        </footer>
+
+      </div>
+    </div>
+  );
+}

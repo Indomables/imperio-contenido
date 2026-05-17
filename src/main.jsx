@@ -9,6 +9,7 @@ import "./styles/contenido.css";
 import "./styles/dashboard.css";
 import "./styles/analisis.css";
 import "./styles/modal.css";
+import "./styles/datepicker.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
