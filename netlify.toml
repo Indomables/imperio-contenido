@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────
-# IMPERIO CONTENIDO · v0.42
-# Build · Functions · DB
+# IMPERIO CONTENIDO · v0.48.2
+# Build · Functions · DB · Security Headers
 # ─────────────────────────────────────────────
 
 [build]
@@ -16,3 +16,33 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ─── SECURITY HEADERS ────────────────────────
+# Cabeceras que el navegador interpreta para bloquear ataques comunes.
+# Aplican a TODAS las respuestas del sitio (frontend + APIs).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # HSTS: fuerza HTTPS durante 1 año.
+    # Después del primer hit, el navegador NUNCA aceptará http://
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+
+    # Bloquea que la app se embeba en un <iframe> de otro sitio.
+    # Evita clickjacking (que alguien te engañe haciendo clic sobre
+    # un iframe invisible).
+    X-Frame-Options = "DENY"
+
+    # El navegador respeta el Content-Type que envía el servidor,
+    # no "adivina" el tipo. Evita ejecución de archivos malintencionados
+    # camuflados como imágenes/PDF/etc.
+    X-Content-Type-Options = "nosniff"
+
+    # Cuando navegas DESDE Imperio a otro dominio, el navegador solo manda
+    # el origin (https://imperio-contenido.netlify.app), no la URL completa
+    # con IDs/tokens. Dentro del propio dominio sí pasa la URL completa.
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+    # Bloquea explícitamente acceso a hardware sensible. Si algún script
+    # intenta activar cámara/micrófono/geolocalización, el navegador lo
+    # bloquea de raíz. También desactiva FLoC (interest-cohort).
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), interest-cohort=()"
