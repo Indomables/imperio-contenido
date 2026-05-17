@@ -1,0 +1,27 @@
+{
+  "name": "imperio-contenido",
+  "private": true,
+  "version": "0.42.0",
+  "type": "module",
+  "scripts": {
+    "dev": "netlify dev",
+    "vite": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@netlify/database": "^1.0.0",
+    "drizzle-orm": "^0.36.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.27.0"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^3.0.0",
+    "@netlify/vite-plugin": "^1.0.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "^5.4.10"
+  }
+}

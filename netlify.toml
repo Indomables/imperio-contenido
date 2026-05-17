@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────
+# IMPERIO CONTENIDO · v0.42
+# Build · Functions · DB
+# ─────────────────────────────────────────────
+
+[build]
+  command = "vite build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Rewrites para que el frontend (SPA) maneje el routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
