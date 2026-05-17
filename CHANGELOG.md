@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Fase 3B · Paridad visual con Claude Design · v0.44.2-α (2026-05-17)
+
+**Hito**: Análisis llega a paridad pixel-a-pixel con la maqueta original de Claude Design tras comparar HTML.
+
+### Añadido
+- **Fila destacada (`highlighted`)** en la pieza más reciente — recuadro dorado con ring del idx en amber. Solo aplica cuando el orden es por fecha desc (orden por defecto); al reordenar por otra columna, el recuadro desaparece para no destacar arbitrariamente.
+- **`barScale` por columna en BENCHMARKS** — cada métrica tiene su valor "techo natural":
+  - `tasa_apertura`: barScale 50 (apertura típica 25-40% → barra llena a 50%)
+  - `tasa_clics`: barScale 5 (clic típico 0-3% → barra llena a 5%)
+  - `tasa_bajas`: barScale 1.5 (bajas típicas 0-1% → barra llena a 1.5%)
+- **Clase `tiny`** en micro-bars de `% Bajas` (container 60px en vez de 80px).
+- **Width mínimo 2%** en micro-bars cuando el valor es 0 o sin datos — aparece la barra "casi vacía" en lugar de invisible.
+
+### Cambiado
+- **Orden del `when`**: ahora fecha plana + hora en `<b>` (antes era al revés), igual que la Claude Design.
+- **Label "Revenue atribuido (€)"** en vez de "Revenue (€)" — consistencia con KPI y con HTML original.
+- **Escala de micro-bars** pasa de dinámica (max del periodo) a absoluta (barScale fijo por columna). Más estable visualmente: al añadir nuevos emails las barras no se "reescalan" entre sí, mantienen referencia fija.
+
+---
+
 ## Fase 3B · Pulido visual · v0.44.1-α (2026-05-17)
 
 **Hito**: Análisis llega al nivel visual de Claude Design — benchmarks contextuales en KPIs y micro-bars de colores en columnas porcentuales.

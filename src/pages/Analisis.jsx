@@ -27,13 +27,14 @@ import CardModal from "../components/CardModal";
 
 // ─── Benchmarks del sector (creator economy / email marketing) ────
 // Ajustables sin tocar el resto del código.
+// `barScale` = valor al que la micro-bar llega al 100% de ancho.
 const BENCHMARKS = {
-  // Apertura email: sector ~25-33% es estándar
-  tasa_apertura: { good: 33, bad: 25 },
-  // Clic email: sector ~1-3% es estándar
-  tasa_clics: { good: 3, bad: 1 },
-  // Bajas email: bajo es bueno (inverso). <0.1% excelente, >1% mala señal.
-  tasa_bajas: { good: 0.1, bad: 1, inverse: true },
+  // Apertura email: sector ~25-33% es estándar. Barra llena a 50%.
+  tasa_apertura: { good: 33, bad: 25, barScale: 50 },
+  // Clic email: sector ~1-3% es estándar. Barra llena a 5%.
+  tasa_clics: { good: 3, bad: 1, barScale: 5 },
+  // Bajas email: bajo es bueno (inverso). Barra llena a 1.5%.
+  tasa_bajas: { good: 0.1, bad: 1, inverse: true, barScale: 1.5 },
 };
 
 // ─── Configuración por formato ────────────────────────────────────
@@ -55,7 +56,7 @@ const FORMATO_CONFIG = {
       { key: "replies",       label: "Replies",     source: "replies",       type: "int" },
       { key: "bajas",         label: "Bajas",       source: "bajas",         type: "int" },
       { key: "tasa_bajas",    label: "% Bajas",     source: "tasa_bajas",    type: "pct", benchmark: BENCHMARKS.tasa_bajas },
-      { key: "revenue_eur",   label: "Revenue (€)", source: "revenue_eur",   type: "eur" },
+      { key: "revenue_eur",   label: "Revenue atribuido (€)", source: "revenue_eur",   type: "eur" },
     ],
   },
   reel: {
@@ -326,23 +327,8 @@ export default function Analisis() {
     });
   }, [rows, sort, formato]);
 
-  // Max por columna pct (para escalar las micro-bars)
-  const conf = FORMATO_CONFIG[formato];
-  const pctMaxes = useMemo(() => {
-    const m = {};
-    for (const col of conf.columns) {
-      if (col.type !== "pct") continue;
-      let max = 0;
-      for (const r of sortedRows) {
-        const v = Number(r.datos?.[col.source]);
-        if (!Number.isNaN(v) && v > max) max = v;
-      }
-      m[col.key] = max;
-    }
-    return m;
-  }, [sortedRows, conf.columns]);
-
   // KPIs del formato activo
+  const conf = FORMATO_CONFIG[formato];
   const kpis = conf.kpis.map((k) => {
     const value = aggregate(k.kind, rows, k.source);
     const sub = kpiSubInfo(k.kind, value, k.benchmark, periodoLabel);
@@ -372,27 +358,31 @@ export default function Analisis() {
     const raw = datos?.[col.source];
 
     if (col.type === "pct") {
-      // Sin valor → dash + bar gris
+      const benchmark = col.benchmark;
+      // Las columnas % Bajas usan container más estrecho (clase tiny → 60px en vez de 80px)
+      const tinyClass = col.source === "tasa_bajas" ? "tiny" : "";
+
       const has = raw !== null && raw !== undefined && raw !== "" && !Number.isNaN(Number(raw));
       if (!has) {
+        // Sin valor: dash + barra mute con 2% de fill (apenas visible, presente)
         return (
           <div className="bar-cell">
             <span className="pct" style={{ color: "var(--ink-4)" }}>—</span>
-            <div className="micro-bar mute"><i style={{ width: 0 }} /></div>
+            <div className={`micro-bar mute ${tinyClass}`}><i style={{ width: "2%" }} /></div>
           </div>
         );
       }
       const n = Number(raw);
-      const cls = barClass(raw, col.benchmark);
-      const max = pctMaxes[col.key] || 0;
-      // Escala dinámica al max de la columna en este periodo,
-      // así las bajas (valores pequeños <1%) también se aprecian.
-      // Si max=0 → todo a 0; cls será "mute".
-      const w = max > 0 && n > 0 ? Math.max(2, (n / max) * 100) : 0;
+      const cls = barClass(raw, benchmark);
+      // Escala absoluta por columna: barScale = valor al que la barra llega al 100%.
+      const scale = benchmark?.barScale ?? 100;
+      const w = n === 0
+        ? 2  // 0% → micro-bar casi vacía pero presente (como en Claude Design)
+        : Math.min(100, Math.max(2, (n / scale) * 100));
       return (
         <div className="bar-cell">
           <span className="pct">{n.toFixed(1)}%</span>
-          <div className={`micro-bar ${cls}`}>
+          <div className={`micro-bar ${cls} ${tinyClass}`}>
             <i style={{ width: `${w}%` }} />
           </div>
         </div>
@@ -511,8 +501,19 @@ export default function Analisis() {
               sortedRows.map((row, idx) => {
                 const p = row.pieza;
                 const idea = p.idea_id ? ideasById.get(p.idea_id) : null;
+                // La fila más reciente lleva el recuadro dorado (highlighted) —
+                // refuerza dónde se mira primero. Solo aplica cuando el orden es
+                // por fecha desc (el orden por defecto); si Soma reordena por
+                // otra columna, el "idx 0" deja de ser "lo más reciente" y no
+                // debería destacarse arbitrariamente.
+                const isHighlighted =
+                  idx === 0 && sort.key === "fecha" && sort.dir === "desc";
                 return (
-                  <tr key={p.id} onClick={() => setSelected({ kind: "pieza", data: p })}>
+                  <tr
+                    key={p.id}
+                    className={isHighlighted ? "highlighted" : ""}
+                    onClick={() => setSelected({ kind: "pieza", data: p })}
+                  >
                     <td className="idx">
                       <span className="ring">{idx + 1}</span>
                     </td>
@@ -523,8 +524,8 @@ export default function Analisis() {
                       )}
                       {p.fecha_publicacion && (
                         <div className="when">
-                          <b>{formatDateShort(p.fecha_publicacion)}</b>
-                          {"  ·  "}{formatTimeHM(p.fecha_publicacion)}
+                          {formatDateShort(p.fecha_publicacion)}
+                          {" · "}<b>{formatTimeHM(p.fecha_publicacion)}</b>
                         </div>
                       )}
                     </td>
