@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
-import { piezasApi } from "../api/piezas";
+import { piezas as piezasApi } from "../lib/api";
 
 const FORMATOS = [
   { val: "email",     label: "Email"     },
@@ -22,7 +22,7 @@ const FORMATOS = [
   { val: "grieta",    label: "Grieta"    },
 ];
 
-export default function NuevaPiezaModal({ onClose, onCreated, idea = null, defaultColumna = "desarrollo" }) {
+export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, ideaTitle = null, defaultColumna = "desarrollo" }) {
   const [titulo, setTitulo] = useState("");
   const [formato, setFormato] = useState("email");
   const [plataforma, setPlataforma] = useState("kit"); // solo para email
@@ -90,10 +90,10 @@ export default function NuevaPiezaModal({ onClose, onCreated, idea = null, defau
         fecha_publicacion: fechaPublicacion || null,
         url_publicacion: urlPublicacion.trim(),
         notas: notas.trim(),
-        idea_id: idea?.id || null,
+        idea_id: ideaId || null,
       };
       const created = await piezasApi.create(payload);
-      onCreated?.(created);
+      onCreate?.(created);
       onClose();
     } catch (e) {
       alert(`Error al crear la pieza: ${e.message || e}`);
@@ -101,8 +101,8 @@ export default function NuevaPiezaModal({ onClose, onCreated, idea = null, defau
     }
   }
 
-  const breadcrumb = idea
-    ? `DESDE «${(idea.titulo || "IDEA").toUpperCase()}»`
+  const breadcrumb = ideaId
+    ? `DESDE «${(ideaTitle || "IDEA").toUpperCase()}»`
     : `NUEVA · DESDE CERO`;
 
   return (
