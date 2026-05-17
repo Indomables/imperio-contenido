@@ -129,25 +129,30 @@ export default async (req: Request, _context: Context) => {
         return badRequest("columna inválida");
       }
 
-      // Merge: usa el valor nuevo si viene, si no el actual
-      const pick = <T>(key: string, fallback: T): T =>
-        body[key] !== undefined ? body[key] : fallback;
-
-      const titulo = pick("titulo", existing.titulo);
-      const formato = pick("formato", existing.formato);
-      const columna = pick("columna", existing.columna);
-      const contenido = pick("contenido", existing.contenido);
+      // Merge: usa el valor nuevo si viene definido, si no el actual
+      const titulo =
+        body.titulo !== undefined ? body.titulo : existing.titulo;
+      const formato =
+        body.formato !== undefined ? body.formato : existing.formato;
+      const columna =
+        body.columna !== undefined ? body.columna : existing.columna;
+      const contenido =
+        body.contenido !== undefined ? body.contenido : existing.contenido;
       const fechaPublicacion =
         body.fecha_publicacion !== undefined
           ? body.fecha_publicacion
           : existing.fecha_publicacion;
-      const plataformas = pick("plataformas", existing.plataformas);
+      const plataformas =
+        body.plataformas !== undefined
+          ? body.plataformas
+          : existing.plataformas;
       const urlPublicacion =
         body.url_publicacion !== undefined
           ? body.url_publicacion
           : existing.url_publicacion;
-      const notas = pick("notas", existing.notas);
-      const tematica = pick("tematica", existing.tematica);
+      const notas = body.notas !== undefined ? body.notas : existing.notas;
+      const tematica =
+        body.tematica !== undefined ? body.tematica : existing.tematica;
       const ideaId =
         body.idea_id !== undefined ? body.idea_id : existing.idea_id;
 
