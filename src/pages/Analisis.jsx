@@ -1,17 +1,20 @@
 /**
  * Análisis — Performance por formato y período.
  *
- * Fase 3B: datos reales.
- *  · Carga todas las piezas + todas las métricas en paralelo.
- *  · Solo cuenta piezas con `fecha_publicacion` en el pasado (= publicadas al mundo).
- *  · Chips de periodo filtran por ventana sobre fecha_publicacion.
- *  · Chips de tipo cambian qué KPIs y qué columnas se muestran.
- *  · Headers de la tabla son sortable (click para ordenar asc/desc).
- *  · Click en una fila abre el CardModal de esa pieza (igual que en Tablero).
+ * v0.44.1: benchmarks visuales y micro-bars de colores.
+ *  · KPIs con sublínea que compara contra benchmark del sector:
+ *      ↑ por encima · ≈ benchmark sector · ↓ por debajo · — sin datos
+ *  · Columnas porcentuales renderizan micro-bar de colores
+ *    (verde = above, amarillo = sector, rojo = below, gris = mute).
+ *  · Eliminada la columna "Fecha" del final (la fecha ya está bajo el título).
  *
- * Cada formato declara su config en FORMATO_CONFIG:
- *  · kpis: array de 4 tarjetas. Cada KPI = { key, label, kind: 'count'|'avg'|'sum', source?, unit? }
- *  · columns: array de columnas de la tabla. Cada col = { key, label, source?, type, sortable }
+ * Estructura:
+ *  · Configuración declarativa por formato en FORMATO_CONFIG.
+ *  · Benchmarks ajustables por KPI / columna ({ good, bad, inverse? }).
+ *  · Solo cuenta piezas con `fecha_publicacion` ≤ hoy.
+ *  · Filtros: periodo (30d/90d/6m/Todo) + tipo (Email/Reel/Relámpago/YT/Grieta).
+ *  · Sortable por header (1 click desc → 2 asc → 3 reset).
+ *  · Click en fila abre CardModal (igual que Tablero).
  */
 
 import { useEffect, useMemo, useState, useCallback } from "react";
@@ -22,45 +25,46 @@ import {
 } from "../lib/api";
 import CardModal from "../components/CardModal";
 
-// ─── Configuración por formato ───────────────────────────────────
-//
-// 'kpis' soporta:
-//   { kind: 'count' }                          → nº piezas filtradas
-//   { kind: 'avg',  source: 'tasa_apertura', unit: 'pct' }
-//   { kind: 'avg',  source: 'likes' }
-//   { kind: 'sum',  source: 'revenue_eur', unit: 'eur' }
-//
-// 'columns' soporta:
-//   { key, label, source, type: 'int'|'pct'|'eur'|'title', sortable }
+// ─── Benchmarks del sector (creator economy / email marketing) ────
+// Ajustables sin tocar el resto del código.
+const BENCHMARKS = {
+  // Apertura email: sector ~25-33% es estándar
+  tasa_apertura: { good: 33, bad: 25 },
+  // Clic email: sector ~1-3% es estándar
+  tasa_clics: { good: 3, bad: 1 },
+  // Bajas email: bajo es bueno (inverso). <0.1% excelente, >1% mala señal.
+  tasa_bajas: { good: 0.1, bad: 1, inverse: true },
+};
 
+// ─── Configuración por formato ────────────────────────────────────
 const FORMATO_CONFIG = {
   email: {
     label: "Email",
     kpis: [
-      { key: "count",  kind: "count", label: "Emails publicados" },
-      { key: "ap",     kind: "avg",   label: "Apertura media", source: "tasa_apertura", unit: "pct" },
-      { key: "cl",     kind: "avg",   label: "Clic medio",     source: "tasa_clics",    unit: "pct" },
-      { key: "rev",    kind: "sum",   label: "Revenue atribuido", source: "revenue_eur", unit: "eur" },
+      { key: "count", kind: "count", label: "Emails publicados" },
+      { key: "ap",    kind: "avg",   label: "Apertura media",     source: "tasa_apertura", unit: "pct", benchmark: BENCHMARKS.tasa_apertura },
+      { key: "cl",    kind: "avg",   label: "Clic medio",         source: "tasa_clics",    unit: "pct", benchmark: BENCHMARKS.tasa_clics    },
+      { key: "rev",   kind: "sum",   label: "Revenue atribuido",  source: "revenue_eur",   unit: "eur" },
     ],
     columns: [
-      { key: "enviados",      label: "Enviados",      source: "enviados",       type: "int" },
-      { key: "aperturas",     label: "Aperturas",     source: "aperturas",      type: "int" },
-      { key: "tasa_apertura", label: "% Apertura",    source: "tasa_apertura",  type: "pct" },
-      { key: "clics",         label: "Clics",         source: "clics",          type: "int" },
-      { key: "tasa_clics",    label: "% Clics",       source: "tasa_clics",     type: "pct" },
-      { key: "replies",       label: "Replies",       source: "replies",        type: "int" },
-      { key: "bajas",         label: "Bajas",         source: "bajas",          type: "int" },
-      { key: "tasa_bajas",    label: "% Bajas",       source: "tasa_bajas",     type: "pct" },
-      { key: "revenue_eur",   label: "Revenue (€)",   source: "revenue_eur",    type: "eur" },
+      { key: "enviados",      label: "Enviados",    source: "enviados",      type: "int" },
+      { key: "aperturas",     label: "Aperturas",   source: "aperturas",     type: "int" },
+      { key: "tasa_apertura", label: "% Apertura",  source: "tasa_apertura", type: "pct", benchmark: BENCHMARKS.tasa_apertura },
+      { key: "clics",         label: "Clics",       source: "clics",         type: "int" },
+      { key: "tasa_clics",    label: "% Clics",     source: "tasa_clics",    type: "pct", benchmark: BENCHMARKS.tasa_clics },
+      { key: "replies",       label: "Replies",     source: "replies",       type: "int" },
+      { key: "bajas",         label: "Bajas",       source: "bajas",         type: "int" },
+      { key: "tasa_bajas",    label: "% Bajas",     source: "tasa_bajas",    type: "pct", benchmark: BENCHMARKS.tasa_bajas },
+      { key: "revenue_eur",   label: "Revenue (€)", source: "revenue_eur",   type: "eur" },
     ],
   },
   reel: {
     label: "Reel",
     kpis: [
       { key: "count", kind: "count", label: "Reels publicados" },
-      { key: "lk",    kind: "avg",   label: "Likes medios",        source: "likes" },
-      { key: "cm",    kind: "avg",   label: "Comentarios medios",  source: "comentarios" },
-      { key: "sk",    kind: "sum",   label: "Miembros Skool",      source: "miembros_skool" },
+      { key: "lk",    kind: "avg",   label: "Likes medios",       source: "likes" },
+      { key: "cm",    kind: "avg",   label: "Comentarios medios", source: "comentarios" },
+      { key: "sk",    kind: "sum",   label: "Miembros Skool",     source: "miembros_skool" },
     ],
     columns: [
       { key: "likes",          label: "Likes",          source: "likes",          type: "int" },
@@ -72,9 +76,9 @@ const FORMATO_CONFIG = {
     label: "Grieta",
     kpis: [
       { key: "count", kind: "count", label: "Grietas publicadas" },
-      { key: "lk",    kind: "avg",   label: "Likes medios",        source: "likes" },
-      { key: "cm",    kind: "avg",   label: "Comentarios medios",  source: "comentarios" },
-      { key: "sk",    kind: "sum",   label: "Miembros Skool",      source: "miembros_skool" },
+      { key: "lk",    kind: "avg",   label: "Likes medios",       source: "likes" },
+      { key: "cm",    kind: "avg",   label: "Comentarios medios", source: "comentarios" },
+      { key: "sk",    kind: "sum",   label: "Miembros Skool",     source: "miembros_skool" },
     ],
     columns: [
       { key: "likes",          label: "Likes",          source: "likes",          type: "int" },
@@ -113,10 +117,10 @@ const FORMATO_CONFIG = {
 };
 
 const PERIODOS = [
-  { key: "30d", label: "Últimos 30 días", days: 30 },
-  { key: "90d", label: "Últimos 90 días", days: 90 },
-  { key: "6m",  label: "Últimos 6 meses", days: 180 },
-  { key: "all", label: "Todo",            days: null },
+  { key: "30d", label: "Últimos 30 días", days: 30,  short: "30 DÍAS"  },
+  { key: "90d", label: "Últimos 90 días", days: 90,  short: "90 DÍAS"  },
+  { key: "6m",  label: "Últimos 6 meses", days: 180, short: "6 MESES"  },
+  { key: "all", label: "Todo",            days: null, short: "TODO"    },
 ];
 
 const FORMATOS_ORDEN = ["email", "reel", "relampago", "youtube", "grieta"];
@@ -157,15 +161,6 @@ function formatEur(v) {
   return n.toLocaleString("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 }
 
-function formatCellValue(value, type) {
-  switch (type) {
-    case "int": return formatInt(value);
-    case "pct": return formatPct(value);
-    case "eur": return formatEur(value);
-    default:    return value ?? null;
-  }
-}
-
 function formatDateShort(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -173,7 +168,13 @@ function formatDateShort(iso) {
     .replace(/\./g, "").toUpperCase();
 }
 
-// Para los KPI: medias y sumas omitiendo nulos/undefined
+function formatTimeHM(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Para los KPI: medias y sumas omitiendo nulos
 function aggregate(kind, rows, source) {
   if (kind === "count") return rows.length;
   const values = rows
@@ -194,6 +195,43 @@ function formatKpiValue(kind, value, unit) {
   return Math.round(value).toLocaleString("es-ES");
 }
 
+// Devuelve la clase visual (above / below / "" / mute) según benchmark.
+// 0 se trata como "mute" porque suele indicar ausencia de actividad,
+// no rendimiento medible.
+function barClass(value, benchmark) {
+  if (value === null || value === undefined || value === "") return "mute";
+  const n = Number(value);
+  if (Number.isNaN(n)) return "mute";
+  if (n === 0) return "mute";
+
+  if (!benchmark) return "";
+  const { good, bad, inverse } = benchmark;
+
+  if (inverse) {
+    if (n <= good) return "above";    // valor bajo = bueno
+    if (n >= bad)  return "below";    // valor alto = malo
+    return "";
+  }
+  if (n >= good) return "above";
+  if (n <  bad)  return "below";
+  return "";
+}
+
+// Sublínea contextual del KPI (con color y texto)
+function kpiSubInfo(kind, value, benchmark, periodoLabel) {
+  if (kind === "count") return { text: periodoLabel, cls: "" };
+  if (kind === "sum")   return { text: "suma del periodo", cls: "" };
+  // avg
+  if (value === null) return { text: "sin datos en el periodo", cls: "" };
+  if (!benchmark) return { text: "media del periodo", cls: "" };
+
+  const cls = barClass(value, benchmark);
+  if (cls === "above") return { text: "↑ por encima del sector", cls: "pos"  };
+  if (cls === "below") return { text: "↓ por debajo del sector", cls: "neg"  };
+  if (cls === "mute")  return { text: "media del periodo",       cls: ""     };
+  return { text: "≈ benchmark sector", cls: "warn" };
+}
+
 // ─── Componente ──────────────────────────────────────────────────
 
 export default function Analisis() {
@@ -208,7 +246,6 @@ export default function Analisis() {
   const [sort, setSort] = useState({ key: "fecha", dir: "desc" });
   const [selected, setSelected] = useState(null);
 
-  // Cargar todo en paralelo
   const reload = useCallback(async () => {
     try {
       setLoading(true);
@@ -230,16 +267,17 @@ export default function Analisis() {
 
   useEffect(() => { reload(); }, [reload]);
 
-  // Indexar métricas por pieza_id para lookup O(1)
   const metricasMap = useMemo(() => {
     const m = new Map();
     for (const row of metricasArr) m.set(row.pieza_id, row.datos || {});
     return m;
   }, [metricasArr]);
 
-  // Contadores por formato (para los chips de tipo) — siempre con periodo aplicado
+  const periodoConf = PERIODOS.find((p) => p.key === periodo);
+  const periodoLabel = periodo === "all" ? "historial completo" : periodoConf.label.toLowerCase();
+
+  // Contadores por formato (con periodo aplicado)
   const counts = useMemo(() => {
-    const periodoConf = PERIODOS.find((p) => p.key === periodo);
     const c = { email: 0, reel: 0, relampago: 0, youtube: 0, grieta: 0 };
     for (const p of piezas) {
       if (!isPublishedInPast(p.fecha_publicacion)) continue;
@@ -247,22 +285,18 @@ export default function Analisis() {
       if (c[p.formato] !== undefined) c[p.formato] += 1;
     }
     return c;
-  }, [piezas, periodo]);
+  }, [piezas, periodoConf]);
 
-  // Filas crudas: piezas filtradas + métricas asociadas (rows = [{pieza, datos}])
+  // Filas crudas
   const rows = useMemo(() => {
     const conf = FORMATO_CONFIG[formato];
     if (!conf) return [];
-    const periodoConf = PERIODOS.find((p) => p.key === periodo);
     return piezas
       .filter((p) => p.formato === formato)
       .filter((p) => isPublishedInPast(p.fecha_publicacion))
       .filter((p) => isInPeriod(p.fecha_publicacion, periodoConf?.days ?? null))
-      .map((p) => ({
-        pieza: p,
-        datos: metricasMap.get(p.id) || {},
-      }));
-  }, [piezas, metricasMap, formato, periodo]);
+      .map((p) => ({ pieza: p, datos: metricasMap.get(p.id) || {} }));
+  }, [piezas, metricasMap, formato, periodoConf]);
 
   // Filas ordenadas
   const sortedRows = useMemo(() => {
@@ -292,12 +326,28 @@ export default function Analisis() {
     });
   }, [rows, sort, formato]);
 
-  // KPIs del formato activo
+  // Max por columna pct (para escalar las micro-bars)
   const conf = FORMATO_CONFIG[formato];
-  const kpis = conf.kpis.map((k) => ({
-    ...k,
-    value: aggregate(k.kind, rows, k.source),
-  }));
+  const pctMaxes = useMemo(() => {
+    const m = {};
+    for (const col of conf.columns) {
+      if (col.type !== "pct") continue;
+      let max = 0;
+      for (const r of sortedRows) {
+        const v = Number(r.datos?.[col.source]);
+        if (!Number.isNaN(v) && v > max) max = v;
+      }
+      m[col.key] = max;
+    }
+    return m;
+  }, [sortedRows, conf.columns]);
+
+  // KPIs del formato activo
+  const kpis = conf.kpis.map((k) => {
+    const value = aggregate(k.kind, rows, k.source);
+    const sub = kpiSubInfo(k.kind, value, k.benchmark, periodoLabel);
+    return { ...k, value, sub };
+  });
 
   function toggleSort(key) {
     setSort((s) => {
@@ -306,18 +356,61 @@ export default function Analisis() {
       return { key: "fecha", dir: "desc" }; // 3er click: reset
     });
   }
-
   function arrow(key) {
     if (sort.key !== key) return null;
     return <span className="arr">{sort.dir === "asc" ? "↑" : "↓"}</span>;
   }
 
-  // Para mostrar la idea de origen de una pieza (preview en la columna titulo)
   const ideasById = useMemo(() => {
     const m = new Map();
     for (const i of ideas) m.set(i.id, i);
     return m;
   }, [ideas]);
+
+  // ─── Render de celdas ──────────────────────────────────────────
+  function renderCell(col, datos) {
+    const raw = datos?.[col.source];
+
+    if (col.type === "pct") {
+      // Sin valor → dash + bar gris
+      const has = raw !== null && raw !== undefined && raw !== "" && !Number.isNaN(Number(raw));
+      if (!has) {
+        return (
+          <div className="bar-cell">
+            <span className="pct" style={{ color: "var(--ink-4)" }}>—</span>
+            <div className="micro-bar mute"><i style={{ width: 0 }} /></div>
+          </div>
+        );
+      }
+      const n = Number(raw);
+      const cls = barClass(raw, col.benchmark);
+      const max = pctMaxes[col.key] || 0;
+      // Escala dinámica al max de la columna en este periodo,
+      // así las bajas (valores pequeños <1%) también se aprecian.
+      // Si max=0 → todo a 0; cls será "mute".
+      const w = max > 0 && n > 0 ? Math.max(2, (n / max) * 100) : 0;
+      return (
+        <div className="bar-cell">
+          <span className="pct">{n.toFixed(1)}%</span>
+          <div className={`micro-bar ${cls}`}>
+            <i style={{ width: `${w}%` }} />
+          </div>
+        </div>
+      );
+    }
+
+    // int / eur / fallback
+    let formatted = null;
+    if (col.type === "int") formatted = formatInt(raw);
+    else if (col.type === "eur") formatted = formatEur(raw);
+    else formatted = raw ?? null;
+
+    return (
+      <span className={`val ${formatted === null ? "dash" : ""}`}>
+        {formatted === null ? "—" : formatted}
+      </span>
+    );
+  }
 
   return (
     <>
@@ -372,11 +465,7 @@ export default function Analisis() {
             <div className={`v ${k.value === null ? "dash" : ""}`}>
               {loading ? "—" : formatKpiValue(k.kind, k.value, k.unit)}
             </div>
-            <div className="sub">
-              {k.kind === "count" ? "en el periodo" :
-               k.kind === "avg"   ? "media del periodo" :
-               k.kind === "sum"   ? "total del periodo" : ""}
-            </div>
+            <div className={`sub ${k.sub.cls}`}>{k.sub.text}</div>
           </div>
         ))}
       </div>
@@ -401,25 +490,18 @@ export default function Analisis() {
                   {c.label} {arrow(c.key)}
                 </th>
               ))}
-              <th
-                className={`sortable ${sort.key === "fecha" ? "sorted" : ""}`}
-                onClick={() => toggleSort("fecha")}
-                style={{ minWidth: 100 }}
-              >
-                Fecha {arrow("fecha")}
-              </th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={conf.columns.length + 3}>
+              <tr><td colSpan={conf.columns.length + 2}>
                 <div className="an-empty">
                   <div className="ring">—</div>
                   Cargando…
                 </div>
               </td></tr>
             ) : sortedRows.length === 0 ? (
-              <tr><td colSpan={conf.columns.length + 3}>
+              <tr><td colSpan={conf.columns.length + 2}>
                 <div className="an-empty">
                   <div className="ring">—</div>
                   Sin {FORMATO_CONFIG[formato].label.toLowerCase()}s publicados en este periodo
@@ -442,25 +524,13 @@ export default function Analisis() {
                       {p.fecha_publicacion && (
                         <div className="when">
                           <b>{formatDateShort(p.fecha_publicacion)}</b>
+                          {"  ·  "}{formatTimeHM(p.fecha_publicacion)}
                         </div>
                       )}
                     </td>
-                    {conf.columns.map((c) => {
-                      const raw = row.datos?.[c.source];
-                      const formatted = formatCellValue(raw, c.type);
-                      return (
-                        <td key={c.key}>
-                          <span className={`val ${formatted === null ? "dash" : ""}`}>
-                            {formatted === null ? "—" : formatted}
-                          </span>
-                        </td>
-                      );
-                    })}
-                    <td>
-                      <span className="val">
-                        {formatDateShort(p.fecha_publicacion)}
-                      </span>
-                    </td>
+                    {conf.columns.map((c) => (
+                      <td key={c.key}>{renderCell(c, row.datos)}</td>
+                    ))}
                   </tr>
                 );
               })

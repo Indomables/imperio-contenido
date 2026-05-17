@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## Fase 3B · Pulido visual · v0.44.1-α (2026-05-17)
+
+**Hito**: Análisis llega al nivel visual de Claude Design — benchmarks contextuales en KPIs y micro-bars de colores en columnas porcentuales.
+
+### Añadido
+- **Benchmarks del sector** ajustables en `Analisis.jsx` (constante `BENCHMARKS`):
+  - `tasa_apertura`: good ≥ 33% · bad < 25% (estándar email marketing).
+  - `tasa_clics`: good ≥ 3% · bad < 1%.
+  - `tasa_bajas`: good ≤ 0.1% · bad ≥ 1% · `inverse: true` (bajo = bueno).
+- **Sublíneas de KPI con color y semántica**:
+  - "↑ por encima del sector" (verde) si media supera el threshold `good`.
+  - "≈ benchmark sector" (amarillo) si está en zona normal.
+  - "↓ por debajo del sector" (rojo) si está bajo `bad`.
+  - "últimos N días" / "suma del periodo" / "media del periodo" según el tipo de KPI.
+- **Micro-bars coloreadas** en celdas `% Apertura`, `% Clics`, `% Bajas`:
+  - Verde (`.above`) · Amarillo (default) · Rojo (`.below`) · Gris (`.mute`).
+  - Ancho escalado al **max de la columna en el periodo** (las bajas <1% siguen siendo visibles).
+  - 0% se trata como `mute` (no es rendimiento medible).
+- Hora de publicación (HH:mm) junto a la fecha en `.title-col .when`.
+
+### Cambiado
+- Eliminada la columna **Fecha** del final de la tabla (redundante con la fecha bajo el título).
+
+### Pendiente para próxima iteración
+- **StatusBar contextual**: la Claude Design muestra info de la pestaña activa abajo
+  ("FILTRO EMAIL · 90D · FILAS 9 · BENCHMARK ≈ SECTOR · ATRIBUCIÓN OK"). La nuestra
+  muestra info global. Requiere refactor con contexto React — pendiente.
+
+---
+
 ## Fase 3B · Análisis funcional · v0.44.0-α (2026-05-17)
 
 **Hito**: la pestaña Análisis muestra datos reales. Filtros por periodo y tipo, KPIs y tabla dinámicos según el formato seleccionado, headers sortable.
