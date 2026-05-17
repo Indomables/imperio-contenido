@@ -1,5 +1,81 @@
 # CHANGELOG
 
+## Fase 3C · Dashboard clavado a Claude Design · v0.46.0-α (2026-05-17)
+
+**Hito**: Dashboard funcional con 8 paneles, paridad pixel-perfect con la
+maqueta de Claude Design. Cierra la trilogía de pestañas (Tablero, Análisis,
+Dashboard).
+
+### Hallazgo previo
+Los 4 CSS (`soma`, `contenido`, `analisis`, `dashboard`) son byte-perfect
+idénticos al paquete de Claude Design. Como con las otras dos pestañas, el
+chasis ya estaba completo. Lo que faltaba era construir el JSX del Dashboard
+(antes era un placeholder "EN CONSTRUCCIÓN").
+
+### Añadido
+
+**Dashboard.jsx (8 paneles, 3 columnas)**:
+
+LEFT:
+- **01 · Operator**: avatar + ID · IMP-0001 · Soma Alcázar · Founder · Creator
+  · ONLINE. Filas: Foco · Frecuencia · Próxima (dinámica desde agendadas) · Modo.
+- **02 · En desarrollo**: lista real de piezas con `columna=desarrollo`. Status
+  derivado: `casi listo` (≤1 día desde último edit), `cocinando` (más), `listo`
+  si la columna es `listo`. Micro: `EDIT · {N}D` con días desde updated_at.
+
+CENTER:
+- **03 · Sesión · Hoy**: greeting según hora (`BUENOS DÍAS` / `BUENAS TARDES` /
+  `BUENAS NOCHES`), reloj live con segundos, fecha tipo `SÁB · 16 MAY · W20`
+  con semana ISO. Capture bar embebida con 6 quick-tags coloreados (Idea/Email/
+  Reel/Relámpago/YouTube/Grieta). Pie: MODO · PRÓXIMA SALIDA dinámica · EN COLA ·
+  ⌘K. Mini-KPIs (4): Apertura media (sector positivo/neutro/negativo según
+  benchmark), Clic medio (sin tracking), Revenue 90D, Suscriptores (max enviados).
+- **04 · Pipeline · Funnel**: 5 stages con contadores reales (Ideas · Desarrollo ·
+  Listo · Agendado · Publicado). Última stage en verde olivo (`.publi`).
+- **05 · Top piezas · 90D**: top 3 emails publicados en últimos 90 días por
+  % apertura. Cada fila con `▲ +X.X vs media` / `▼ -X.X vs media` / `≈ media`
+  según delta vs media del set. Sparkline SVG decorativa (estática por ahora).
+
+RIGHT:
+- **06 · Agendado · Próximas salidas**: lista real de piezas `columna=agendado`
+  ordenadas por fecha asc. Cada fila: título, `FORMATO · N destinos`, `DOW DD ·
+  HH:MM`, micro `EN ND` / `HOY`. **Cal-strip de 7 días alrededor de hoy** (3
+  pasados, hoy, 3 futuros). Cada día marca un evento (`<i>`) si hay agendado.
+- **Mantra**: panel sin header con cita _"Publicar es la única prueba."_ y
+  credit `IMPERIO INDOMABLE · CÓDIGO PROPIO`.
+- **07 · Atajos**: 4 filas. Las 2 primeras son `NavLink` a Tablero y Análisis
+  (con contadores reales). 3ª focusea capture bar. 4ª link a Tablero.
+
+**StatusBar contextual del Dashboard**:
+- Reporta los contadores reales al right del statusbar: `IDEAS X · PIEZAS X ·
+  AGENDADAS X · PUBLICADAS X` (antes salían como `—`).
+- `PIEZAS` = todas las no publicadas (desarrollo + listo + agendadas).
+- Left queda con los defaults (`DASHBOARD · COCKPIT · OPERADOR · UPTIME`).
+
+**Helpers nuevos (en Dashboard.jsx)**:
+- `greetingFor(date)`: greeting según hora.
+- `dateBadge(date)`: `DOW · DD MMM · W##` con semana ISO calculada.
+- `whenShort(iso)`: `DOW DD · HH:MM`.
+- `relativeDays(iso)`: `HOY` / `EN ND` / `HACE ND`.
+- `daysAgo(iso)`: días desde una fecha pasada.
+- `topSubtitle(pieza, datos)`: subtítulo para top piezas con fecha + enviados.
+
+### Conservado
+- Modal de edición sigue funcionando (no cambia).
+- API y schema sin cambios.
+- Sistema visual (CSS): sin tocar — los 4 CSS ya estaban clavados.
+- Tablero y Análisis (paquetes anteriores) sin cambios.
+
+### Pendiente
+- Drag & drop entre carriles del Tablero.
+- Port de 6 edge functions Supabase → Netlify Scheduled Functions (cuando
+  el tracking de Clics esté activo, quitar `noTrackingYet` en Análisis).
+- Tablero también debería reportar `usePageStatus` con contadores reales
+  (ahora muestra defaults `—`). Cambio pequeño que añadiré cuando lo veas
+  necesario.
+
+---
+
 ## Fase 3B-final · Análisis clavado a Claude Design · v0.45.1-α (2026-05-17)
 
 **Hito**: Análisis alcanza paridad total con la maqueta de Claude Design tras
