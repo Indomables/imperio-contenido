@@ -1,0 +1,189 @@
+/* ─────────────────────────────────────────────────────────────
+ * CardModal — estilos en el sistema SOMA OS
+ * ───────────────────────────────────────────────────────────── */
+
+.cm-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: oklch(0.04 0.01 235 / 0.78);
+  backdrop-filter: blur(6px);
+  display: grid; place-items: center;
+  padding: 32px;
+  animation: cmFadeIn 0.15s ease-out;
+}
+@keyframes cmFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.cm-panel {
+  position: relative;
+  width: 100%; max-width: 920px;
+  max-height: calc(100vh - 64px);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  display: flex; flex-direction: column;
+  box-shadow:
+    0 0 0 1px oklch(0.18 0.018 235),
+    0 40px 80px oklch(0.04 0.01 235 / 0.6),
+    inset 0 1px 0 oklch(0.30 0.022 235 / 0.4);
+  animation: cmSlideIn 0.18s ease-out;
+}
+@keyframes cmSlideIn {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Esquineros decorativos */
+.cm-panel .br-tr, .cm-panel .br-bl {
+  position: absolute; width: 14px; height: 14px;
+  border-color: var(--acc);
+}
+.cm-panel .br-tr { top: -1px; right: -1px; border-top: 1px solid; border-right: 1px solid; }
+.cm-panel .br-bl { bottom: -1px; left: -1px; border-bottom: 1px solid; border-left: 1px solid; }
+
+.cm-panel .screw {
+  position: absolute; width: 6px; height: 6px;
+  background: oklch(0.30 0.022 235);
+  border: 1px solid oklch(0.42 0.026 235);
+  border-radius: 50%;
+  box-shadow: inset 0 0 2px oklch(0.08 0.01 235);
+}
+.cm-panel .screw.tl { top: 8px; left: 8px; }
+.cm-panel .screw.tr { top: 8px; right: 8px; }
+.cm-panel .screw.bl { bottom: 8px; left: 8px; }
+.cm-panel .screw.br { bottom: 8px; right: 8px; }
+
+/* Header */
+.cm-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 22px 14px;
+  border-bottom: 1px solid var(--line);
+  background: oklch(0.130 0.016 235);
+  gap: 14px;
+}
+.cm-head-l { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
+.cm-head-r { display: flex; align-items: center; gap: 6px; }
+.cm-kind {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.24em;
+  color: var(--acc); border: 1px solid oklch(from var(--acc) l c h / 0.4);
+  background: var(--acc-bg2); padding: 3px 8px;
+}
+.cm-div { color: var(--ink-5); }
+.cm-title {
+  font-family: var(--sans); font-size: 15px; font-weight: 500;
+  color: var(--ink); letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cm-btn {
+  background: transparent; border: 1px solid var(--line-2); color: var(--ink-2);
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  padding: 6px 12px; cursor: pointer; font-weight: 500;
+  transition: all 0.12s;
+}
+.cm-btn:hover { color: var(--ink); border-color: var(--line-3); background: oklch(0.16 0.018 235); }
+.cm-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.cm-btn.primary { color: var(--acc); border-color: oklch(from var(--acc) l c h / 0.55); background: var(--acc-bg2); }
+.cm-btn.primary:hover { background: var(--acc-bg); }
+.cm-btn.danger { color: oklch(0.72 0.20 30); border-color: oklch(0.72 0.20 30 / 0.45); }
+.cm-btn.danger:hover { background: oklch(0.72 0.20 30 / 0.12); border-color: oklch(0.72 0.20 30); }
+
+.cm-close {
+  background: transparent; border: 1px solid var(--line);
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  color: var(--ink-3); cursor: pointer;
+  font-family: var(--mono); font-size: 13px;
+}
+.cm-close:hover { color: oklch(0.72 0.20 30); border-color: oklch(0.72 0.20 30); }
+
+/* Body */
+.cm-body {
+  padding: 22px 26px;
+  overflow-y: auto; flex: 1;
+  display: flex; flex-direction: column; gap: 18px;
+}
+
+.cm-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cm-label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--ink-4);
+}
+.cm-value { min-width: 0; }
+
+.cm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 640px) { .cm-row { grid-template-columns: 1fr; } }
+
+.cm-text {
+  font-family: var(--sans); font-size: 14px; color: var(--ink);
+  line-height: 1.5;
+}
+.cm-empty {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-5);
+  letter-spacing: 0.10em;
+}
+
+/* HTML rendered inside read mode */
+.cm-html {
+  font-family: var(--sans); font-size: 14px; line-height: 1.6;
+  color: var(--ink-2);
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line);
+  padding: 14px 16px;
+  max-height: 480px; overflow-y: auto;
+}
+.cm-html p, .cm-html div { margin: 0 0 0.7em 0; }
+.cm-html p:last-child, .cm-html div:last-child { margin-bottom: 0; }
+.cm-html h1, .cm-html h2, .cm-html h3 {
+  font-family: var(--sans); color: var(--ink);
+  font-size: 15px; font-weight: 600; margin: 1em 0 0.5em;
+  letter-spacing: -0.005em;
+}
+.cm-html b, .cm-html strong { color: var(--ink); font-weight: 600; }
+.cm-html br { display: block; content: ""; margin-top: 0.4em; }
+.cm-html a { color: var(--acc); }
+
+/* Inputs */
+.cm-input {
+  width: 100%;
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-family: var(--sans); font-size: 14px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.cm-input:focus { border-color: var(--acc); box-shadow: 0 0 0 1px oklch(from var(--acc) l c h / 0.3); }
+
+.cm-textarea {
+  width: 100%;
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  padding: 10px 12px;
+  outline: none; resize: vertical;
+  transition: border-color 0.12s;
+}
+.cm-textarea:focus { border-color: var(--acc); box-shadow: 0 0 0 1px oklch(from var(--acc) l c h / 0.3); }
+
+/* Footer */
+.cm-foot {
+  display: flex; justify-content: space-between;
+  padding: 10px 22px;
+  border-top: 1px solid var(--line);
+  background: oklch(0.130 0.016 235);
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.10em;
+  color: var(--ink-5);
+}
+.cm-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Capture bar select */
+.cmdbar-tag {
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.10em;
+  padding: 7px 10px;
+  cursor: pointer; outline: none;
+}
+.cmdbar-tag:focus { border-color: var(--acc); }
+.cmdbar-tag:disabled { opacity: 0.5; }

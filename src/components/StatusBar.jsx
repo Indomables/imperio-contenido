@@ -16,7 +16,7 @@ export default function StatusBar() {
     <div className="contenido-statusbar">
       <div className="l">
         <span>
-          <span className="led"></span> IMPERIO·CONTENIDO <b>v0.42</b>
+          <span className="led"></span> IMPERIO·CONTENIDO <b>v0.43</b>
         </span>
         <span>{screenLabel}</span>
         <span>
