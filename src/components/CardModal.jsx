@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { snapTo5Min, toDatetimeLocal } from "../lib/datetime";
 
 const FORMATO_LABEL = {
   email:     "EMAIL",
@@ -289,8 +290,15 @@ function PiezaSections({ draft, setField, setContenidoField, tituloRef, editorRe
                 <input
                   type="datetime-local"
                   step="300"
-                  value={draft.fecha_publicacion ? new Date(draft.fecha_publicacion).toISOString().slice(0, 16) : ""}
-                  onChange={(e) => setField("fecha_publicacion", e.target.value ? new Date(e.target.value).toISOString() : null)}
+                  value={toDatetimeLocal(draft.fecha_publicacion)}
+                  onChange={(e) => {
+                    if (!e.target.value) {
+                      setField("fecha_publicacion", null);
+                      return;
+                    }
+                    const snapped = snapTo5Min(e.target.value);
+                    setField("fecha_publicacion", snapped ? snapped.toISOString() : null);
+                  }}
                 />
               </div>
             </div>

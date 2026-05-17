@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { piezas as piezasApi } from "../lib/api";
+import { snapTo5Min, toDatetimeLocal } from "../lib/datetime";
 
 const FORMATOS = [
   { val: "email",     label: "Email"     },
@@ -81,13 +82,17 @@ export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, idea
       setSaving(true);
       // Plataformas = ["kit"] o ["acumba"] solo si formato es email; si no, []
       const plataformas = formato === "email" ? [plataforma] : [];
+      // fecha_publicacion: el input la guarda como string local "YYYY-MM-DDTHH:MM".
+      // Convertimos a ISO con zona para consistencia con CardModal y para que
+      // Postgres TIMESTAMP la interprete sin ambigüedad de zona horaria.
+      const fechaISO = fechaPublicacion ? new Date(fechaPublicacion).toISOString() : null;
       const payload = {
         titulo: titulo.trim(),
         formato,
         columna: defaultColumna,
         plataformas,
         contenido,
-        fecha_publicacion: fechaPublicacion || null,
+        fecha_publicacion: fechaISO,
         url_publicacion: urlPublicacion.trim(),
         notas: notas.trim(),
         idea_id: ideaId || null,
@@ -245,7 +250,14 @@ export default function NuevaPiezaModal({ onClose, onCreate, ideaId = null, idea
                       type="datetime-local"
                       step="300"
                       value={fechaPublicacion}
-                      onChange={(e) => setFechaPublicacion(e.target.value)}
+                      onChange={(e) => {
+                        if (!e.target.value) {
+                          setFechaPublicacion("");
+                          return;
+                        }
+                        const snapped = snapTo5Min(e.target.value);
+                        setFechaPublicacion(snapped ? toDatetimeLocal(snapped) : "");
+                      }}
                     />
                   </div>
                 </div>

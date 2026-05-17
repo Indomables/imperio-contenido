@@ -467,6 +467,9 @@
 }
 
 /* Icono nativo del datetime-local — lo teñimos al verde de la paleta */
+.np-input[type="datetime-local"] {
+  color-scheme: dark;
+}
 .np-input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   filter: invert(0.85) sepia(1) saturate(4) hue-rotate(80deg) brightness(0.95);
   cursor: pointer;
@@ -696,6 +699,11 @@
 .minput textarea::placeholder { color: var(--ink-5); }
 .minput textarea { resize: vertical; min-height: 64px; padding: 12px 0; }
 .minput.notes textarea { min-height: 86px; }
+.minput input[type="datetime-local"] {
+  /* Le decimos al navegador que use el theme oscuro de su control nativo
+     (calendar popup, time picker). Funciona en Chrome/Edge/Safari modernos. */
+  color-scheme: dark;
+}
 .minput input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   filter: invert(0.85) sepia(1) saturate(4) hue-rotate(80deg) brightness(0.95);
   opacity: 0.7; cursor: pointer;
