@@ -24,6 +24,7 @@ import {
   ideas as ideasApi,
 } from "../lib/api";
 import CardModal from "../components/CardModal";
+import { usePageStatus } from "../lib/pageStatus.jsx";
 
 // ─── Benchmarks del sector (creator economy / email marketing) ────
 // Ajustables sin tocar el resto del código.
@@ -51,7 +52,10 @@ const FORMATO_CONFIG = {
       { key: "enviados",      label: "Enviados",    source: "enviados",      type: "int" },
       { key: "aperturas",     label: "Aperturas",   source: "aperturas",     type: "int" },
       { key: "tasa_apertura", label: "% Apertura",  source: "tasa_apertura", type: "pct", benchmark: BENCHMARKS.tasa_apertura },
-      { key: "clics",         label: "Clics",       source: "clics",         type: "int" },
+      // Clics y % Clics: aún no hay tracking activo (Kit / Zernio).
+      // noTrackingYet hace que el "0" salga en gris (val dash) en lugar de
+      // en blanco — señaliza visualmente "no es 0 real, es ausencia de dato".
+      { key: "clics",         label: "Clics",       source: "clics",         type: "int", noTrackingYet: true },
       { key: "tasa_clics",    label: "% Clics",     source: "tasa_clics",    type: "pct", benchmark: BENCHMARKS.tasa_clics },
       { key: "replies",       label: "Replies",     source: "replies",       type: "int" },
       { key: "bajas",         label: "Bajas",       source: "bajas",         type: "int" },
@@ -327,6 +331,33 @@ export default function Analisis() {
     });
   }, [rows, sort, formato]);
 
+  // ─── StatusBar contextual ──────────────────────────────────────
+  // Reportamos a la StatusBar global qué pestaña/filtro/filas estamos
+  // viendo. Se limpia automáticamente al desmontar (al cambiar de
+  // pestaña) gracias al useEffect interno de usePageStatus.
+  const pageStatus = useMemo(
+    () => ({
+      left: [
+        { text: "ANÁLISIS · ", strong: "RENDIMIENTO" },
+        {
+          text: "FILTRO ",
+          strong: `${formato.toUpperCase()} · ${periodoConf?.short ?? "—"}`,
+        },
+        { text: "FILAS ", strong: String(sortedRows.length) },
+      ],
+      right: [
+        {
+          text: "BENCHMARK ",
+          strong: "≈ SECTOR",
+          strongStyle: { color: "oklch(0.82 0.18 75)" },
+        },
+        { text: "ATRIBUCIÓN ", strong: "OK" },
+      ],
+    }),
+    [formato, periodoConf, sortedRows.length],
+  );
+  usePageStatus(pageStatus);
+
   // KPIs del formato activo
   const conf = FORMATO_CONFIG[formato];
   const kpis = conf.kpis.map((k) => {
@@ -395,8 +426,14 @@ export default function Analisis() {
     else if (col.type === "eur") formatted = formatEur(raw);
     else formatted = raw ?? null;
 
+    // Cuando una columna está marcada como sin tracking activo (ej. Clics
+    // mientras la edge function de Kit no esté portada), un 0 se muestra
+    // en gris ("val dash") en lugar de blanco — comunica "no es 0 real,
+    // no tenemos el dato todavía".
+    const dimZero = col.noTrackingYet && Number(raw) === 0;
+
     return (
-      <span className={`val ${formatted === null ? "dash" : ""}`}>
+      <span className={`val ${formatted === null || dimZero ? "dash" : ""}`}>
         {formatted === null ? "—" : formatted}
       </span>
     );

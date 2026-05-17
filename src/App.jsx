@@ -5,6 +5,7 @@ import TopNav from "./components/TopNav.jsx";
 import StatusLine from "./components/StatusLine.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import TweaksPanel from "./components/TweaksPanel.jsx";
+import { PageStatusProvider } from "./lib/pageStatus.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Tablero from "./pages/Tablero.jsx";
 import Analisis from "./pages/Analisis.jsx";
@@ -20,7 +21,7 @@ export default function App() {
   }, []);
 
   return (
-    <>
+    <PageStatusProvider>
       <Boot />
       <div
         className={`app contenido-app${booting ? " booting" : ""}`}
@@ -40,6 +41,6 @@ export default function App() {
         <StatusBar />
         <TweaksPanel />
       </div>
-    </>
+    </PageStatusProvider>
   );
 }

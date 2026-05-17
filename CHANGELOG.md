@@ -1,5 +1,61 @@
 # CHANGELOG
 
+## Fase 3B-final · Análisis clavado a Claude Design · v0.45.1-α (2026-05-17)
+
+**Hito**: Análisis alcanza paridad total con la maqueta de Claude Design tras
+cotejar HTML + los 4 CSS (`soma`, `contenido`, `analisis`, `colors_and_type`).
+
+### Hallazgo
+Los 4 CSS del paquete de Claude Design son **byte-perfect idénticos** a los
+del repo (diff = 0 líneas en cada uno). Como ocurrió con el Tablero, el chasis
+visual ya estaba completo. Lo que faltaba era enriquecer JSX + añadir
+contexto reactivo a la StatusBar.
+
+### Añadido
+
+**Infraestructura nueva — `src/lib/pageStatus.jsx`**:
+- Context React + hook `usePageStatus(status)` para que cada pestaña reporte
+  info contextual a la StatusBar inferior.
+- Hook `usePageStatusValue()` para que StatusBar consuma el context.
+- Cleanup automático al desmontar la página (al cambiar pestaña).
+
+**StatusBar refactorizada**:
+- Consume `PageStatusContext`. Si la pestaña activa reporta status, lo muestra.
+  Sino, defaults globales (SCREEN_LABEL · OPERADOR · UPTIME · contadores).
+- Versión `IMPERIO·CONTENIDO v0.45.1` siempre fija al inicio (izquierda).
+- `⌘K · CAPTURA` siempre fijo al final (derecha).
+
+**App.jsx**:
+- Wrap del árbol con `<PageStatusProvider>` para que toda la app comparta el
+  context.
+
+**Analisis.jsx**:
+- `usePageStatus` reportando: `ANÁLISIS · RENDIMIENTO` · `FILTRO {tipo} · {periodo}`
+  · `FILAS {n}` · `BENCHMARK ≈ SECTOR` (en color warn) · `ATRIBUCIÓN OK`. Coincide
+  exactamente con la maqueta.
+- Reactivo: el filtro y el contador de filas se actualizan en vivo al cambiar
+  formato/periodo o cuando los datos cambian.
+- **`noTrackingYet: true`** añadido a la columna `Clics`: el `0` se muestra en
+  gris (`val dash`) en lugar de blanco — semántica visual "no es 0 real, es que
+  no tenemos tracking todavía". Distingue de `Bajas` (que sí tiene datos
+  reales y los 0 salen en blanco normal).
+
+### Conservado
+- KPIs, sublíneas con benchmarks, micro-bars por columna porcentual.
+- Sort 1-click desc → 2-click asc → 3-click reset.
+- Highlighted row dorada en idx===0 solo cuando sort=fecha desc.
+- Click en fila abre CardModal.
+- Sistema visual (CSS): sin tocar — ya estaba clavado.
+
+### Pendiente
+- Fase 3C: Dashboard funcional (reemplazar el placeholder).
+- Drag & drop entre carriles del Tablero.
+- Port de 6 edge functions de Supabase → Netlify Scheduled Functions
+  (cuando se haga, se activa el tracking de Clics y se elimina el
+  `noTrackingYet` de esa columna).
+
+---
+
 ## Fase 3A · Tablero clavado a Claude Design · v0.45.0-α (2026-05-17)
 
 **Hito**: Tablero alcanza paridad pixel-perfect con la maqueta de Claude Design tras cotejar HTML + CSS uploadeados por Soma.
