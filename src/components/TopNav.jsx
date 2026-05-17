@@ -108,6 +108,11 @@ export default function TopNav() {
             <path d="M8 1v2M8 13v2M15 8h-2M3 8H1M12.9 3.1l-1.4 1.4M4.5 11.5l-1.4 1.4M12.9 12.9l-1.4-1.4M4.5 4.5L3.1 3.1" />
           </svg>
         </button>
+        <button className="iconbtn logout" data-tip="Cerrar sesión">
+          <svg className="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <path d="M6 2H2v12h4M10 5l3 3-3 3M6 8h7" />
+          </svg>
+        </button>
       </div>
     </nav>
   );

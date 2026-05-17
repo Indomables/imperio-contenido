@@ -1,5 +1,59 @@
 # CHANGELOG
 
+## Fase 3A · Tablero clavado a Claude Design · v0.45.0-α (2026-05-17)
+
+**Hito**: Tablero alcanza paridad pixel-perfect con la maqueta de Claude Design tras cotejar HTML + CSS uploadeados por Soma.
+
+### Hallazgo importante
+Los CSS (`soma.css` y `contenido.css`) en el repo eran **byte-perfect idénticos**
+a los del paquete de Claude Design. El "chasis" estaba completo. Lo que faltaba
+era que el JSX **aprovechara** todas las variantes que el CSS ya soportaba.
+
+### Añadido
+
+**TopNav**:
+- 4º botón `iconbtn.logout` (los anteriores ya estaban: sync, zap, settings).
+
+**Tablero · Cards de Ideas (carril 01)**:
+- `.excerpt` con primeras ~180 caracteres de `notas` (3 líneas via CSS clamp).
+- Variante con piezas: `.kcard-foot` con `.pieza-count.has` (contador en amber) + botón `.cut-btn` (✂).
+- Variante sin piezas: clase `.no-piezas` (opacidad 0.45) + botón `.kcta` "✂ Dar forma".
+- Filtros `.kcol-filters`: **Todas / Sin piezas / Con piezas** con contadores en cada chip.
+
+**Tablero · Cards de En desarrollo (carril 02)**:
+- `.subnm` con subtítulo descriptivo: usa `plataformas[]` si está rellenado, si no
+  un default sensato por formato ("YouTube · long-form", "Instagram · 60s", etc.).
+
+**Tablero · Cards de Agendado (carril 04)**:
+- Columna lleva clase `kcol.active` → header con textos blancos brillantes.
+- `.kdate.future` con **icono SVG calendario** + formato `DOW, DD MMM · HH:MM`
+  (ej. "MIÉ, 17 MAY · 18:00") en amber.
+
+**Tablero · Cards de Publicado (carril 05)**:
+- Columna lleva clase `kcol.publicado` → gradient verde completo en toda la
+  columna, badges/cards en verde.
+- `.kdate.past` sin icono, sin hora, en gris (ej. "LUN, 11 MAY").
+
+**Tablero · Headers de columna**:
+- Botón `.add-btn` (+) junto al count en cada header. Focusea el capture bar y
+  pre-selecciona el tag según la columna (Ideas → `idea`, resto → `email`).
+
+**Tablero · Capture bar**:
+- Añadido `.cap-caret` (caret amarillo parpadeante) dentro del `.input-wrap`,
+  como en la maqueta.
+
+### Conservado
+- CardModal sin cambios (sigue funcionando para idea/pieza).
+- API y backend sin cambios.
+- Sistema visual (CSS): sin tocar — ya estaba clavado.
+
+### Pendiente
+- Drag & drop entre carriles (Tablero).
+- StatusBar contextual (cuando hagamos Dashboard).
+- Dashboard funcional (Fase 3C).
+
+---
+
 ## Fase 3B · Paridad visual con Claude Design · v0.44.2-α (2026-05-17)
 
 **Hito**: Análisis llega a paridad pixel-a-pixel con la maqueta original de Claude Design tras comparar HTML.
