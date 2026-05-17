@@ -282,3 +282,206 @@
 .np-hint em {
   font-style: normal; color: var(--ink-2);
 }
+
+/* ─────────────────────────────────────────────────────────────
+ * NuevaPiezaModal · panel más ancho + estilos específicos
+ * ───────────────────────────────────────────────────────────── */
+.np-panel {
+  max-width: 760px;
+  width: 92vw;
+  max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.np-panel .cm-body {
+  overflow-y: auto;
+}
+
+/* Divider con texto centrado (CONTENIDO / PUBLICACIÓN) */
+.np-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 18px 0 14px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.np-divider::before,
+.np-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* Filas de chips (Formato, Lista de envío) */
+.np-chip-row {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.np-chip {
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  cursor: pointer; outline: none;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.np-chip:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+.np-chip.on {
+  color: var(--acc);
+  border-color: var(--acc);
+  background: var(--acc-bg2);
+}
+.np-chip.t-reel.on      { color: oklch(0.75 0.18 55);  border-color: oklch(0.75 0.18 55); background: oklch(0.75 0.18 55 / 0.10); }
+.np-chip.t-youtube.on   { color: oklch(0.62 0.24 25);  border-color: oklch(0.62 0.24 25); background: oklch(0.62 0.24 25 / 0.10); }
+.np-chip.t-relampago.on { color: oklch(0.78 0.18 245); border-color: oklch(0.78 0.18 245); background: oklch(0.78 0.18 245 / 0.10); }
+.np-chip.t-grieta.on    { color: oklch(0.70 0.18 350); border-color: oklch(0.70 0.18 350); background: oklch(0.70 0.18 350 / 0.10); }
+
+/* Fila de 2 columnas (fecha + url) */
+.np-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 600px) {
+  .np-row-2 { grid-template-columns: 1fr; }
+}
+
+/* ─── RichTextEditor ─── */
+.rte {
+  border: 1px solid var(--line-2);
+  background: oklch(0.130 0.016 235);
+  display: flex; flex-direction: column;
+}
+.rte:focus-within {
+  border-color: var(--acc);
+}
+.rte-toolbar {
+  display: flex; gap: 2px;
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+  background: oklch(0.115 0.014 235);
+}
+.rte-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-3);
+  font-family: var(--mono); font-size: 12px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; outline: none;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.rte-btn:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+  background: oklch(0.155 0.018 235);
+}
+.rte-btn-expand { margin-left: auto; }
+.rte-area {
+  padding: 14px;
+  min-height: 220px;
+  max-height: 360px;
+  overflow-y: auto;
+  font-family: var(--sans); font-size: 14px; line-height: 1.6;
+  color: var(--ink);
+  outline: none;
+}
+.rte-expanded .rte-area {
+  min-height: 480px;
+  max-height: 70vh;
+}
+.rte-area:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-4);
+  pointer-events: none;
+}
+/* Estilos del HTML editado */
+.rte-area h1 { font-size: 22px; margin: 8px 0; font-weight: 600; color: var(--ink); }
+.rte-area h2 { font-size: 18px; margin: 8px 0; font-weight: 600; color: var(--ink); }
+.rte-area ul { padding-left: 20px; margin: 6px 0; }
+.rte-area li { margin: 2px 0; }
+.rte-area p  { margin: 6px 0; }
+.rte-area hr {
+  border: none;
+  height: 1px;
+  background: var(--line-2);
+  margin: 14px 0;
+}
+.rte-area b, .rte-area strong { font-weight: 700; color: var(--ink); }
+.rte-area i, .rte-area em     { font-style: italic; }
+
+/* Badge del formato en el header del CardModal (EDITAR PIEZA · [BADGE]).
+   Usa los mismos colores que .kbadge en cards del Tablero. */
+.cm-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.20em;
+  border: 1px solid;
+  margin-left: 8px;
+}
+.cm-badge.t-email     { color: var(--acc);              border-color: oklch(from var(--acc) l c h / 0.55); background: var(--acc-bg2); }
+.cm-badge.t-reel      { color: oklch(0.75 0.18 55);     border-color: oklch(0.75 0.18 55 / 0.55);          background: oklch(0.75 0.18 55 / 0.10); }
+.cm-badge.t-relampago { color: oklch(0.78 0.18 245);    border-color: oklch(0.78 0.18 245 / 0.55);         background: oklch(0.78 0.18 245 / 0.10); }
+.cm-badge.t-youtube   { color: oklch(0.62 0.24 25);     border-color: oklch(0.62 0.24 25 / 0.55);          background: oklch(0.62 0.24 25 / 0.10); }
+.cm-badge.t-grieta    { color: oklch(0.70 0.18 350);    border-color: oklch(0.70 0.18 350 / 0.55);         background: oklch(0.70 0.18 350 / 0.10); }
+
+/* ─────────────────────────────────────────────────────────────
+ * KitIdModal · vincular pieza con broadcast de Kit
+ * ───────────────────────────────────────────────────────────── */
+.kit-panel {
+  max-width: 560px;
+  width: 92vw;
+}
+.kit-head {
+  align-items: flex-start;
+}
+.kit-head .cm-head-l {
+  align-items: flex-start;
+  gap: 12px;
+}
+.kit-bolt {
+  font-size: 18px;
+  color: var(--warn);
+  line-height: 1.2;
+  filter: drop-shadow(0 0 8px oklch(from var(--warn) l c h / 0.5));
+  flex-shrink: 0;
+}
+.kit-head-tx {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 8px;
+  line-height: 1.5;
+}
+.kit-piece-title {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.kit-helper {
+  font-family: var(--mono); font-size: 11px; line-height: 1.6;
+  color: var(--ink-3);
+  margin: 0 0 10px;
+}
+.kit-helper-after {
+  margin: 10px 0 0;
+}
+.kit-helper em {
+  font-style: italic;
+  color: var(--ink-3);
+}
+.kit-helper code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  background: oklch(0.130 0.016 235);
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+}
+
+/* Botón principal del modal de Kit — incluye icono inline */
+.kit-save {
+  display: inline-flex; align-items: center;
+}

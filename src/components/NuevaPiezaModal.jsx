@@ -1,74 +1,69 @@
 /**
- * NuevaPiezaModal — Modal para crear una pieza nueva.
+ * NuevaPiezaModal — Modal completo para crear una pieza nueva.
  *
- * Flujo en pasos:
- *  Paso 1: elegir formato (email, relampago, reel, youtube, grieta)
- *  Paso 2 (solo si formato === "email"): elegir plataforma (Kit / Acumbamail)
- *  Paso 3: título inicial → POST /api/piezas con { titulo, formato, plataformas, idea_id?, columna: "desarrollo" }
+ * Reemplaza al flujo anterior de pasos. Muestra todos los campos
+ * en una sola vista, con los campos de contenido que cambian según
+ * el formato elegido.
  *
- * Si se pasa `ideaId` como prop, la pieza se crea vinculada a esa idea
- * (caso "Dar forma" desde card de Ideas). Si no, queda huérfana (caso "+" en Desarrollo).
+ * Si se pasa `ideaId`, la pieza queda vinculada a esa idea. El header
+ * muestra "DESDE «<idea_title>»" en ese caso.
  *
- * Comparte estilos con CardModal (clases .cm-*).
+ * Estructura del JSON que envía a la API:
+ *   {
+ *     titulo: string,                          // título INTERNO
+ *     formato: "email"|"reel"|"relampago"|"youtube"|"grieta",
+ *     columna: "desarrollo",                   // siempre arranca aquí
+ *     plataformas: ["Kit"] | ["Acumbamail"] | [],
+ *     contenido: { ...campos según formato },
+ *     fecha_publicacion: ISO | null,
+ *     url_publicacion: string,
+ *     notas: string,                           // notas internas
+ *     idea_id?: string
+ *   }
  */
 
 import { useState, useEffect, useRef } from "react";
+import RichTextEditor from "./RichTextEditor";
 
-// Opciones de formato — orden y label que ve el usuario
 const FORMATOS = [
-  { value: "email",     label: "Email",     icon: "✉",  desc: "Newsletter o broadcast" },
-  { value: "relampago", label: "Relámpago", icon: "⚡", desc: "Email corto y directo" },
-  { value: "reel",      label: "Reel",      icon: "▶",  desc: "Instagram vertical 60s" },
-  { value: "youtube",   label: "YouTube",   icon: "■",  desc: "Long-form" },
-  { value: "grieta",    label: "Grieta",    icon: "✦",  desc: "Instagram + YouTube Shorts" },
+  { value: "email",     label: "Email" },
+  { value: "reel",      label: "Reel" },
+  { value: "relampago", label: "Relámpago" },
+  { value: "youtube",   label: "YouTube" },
+  { value: "grieta",    label: "Grieta" },
 ];
 
-// Plataformas para email
 const PLATAFORMAS_EMAIL = [
-  { value: "Kit",        label: "Kit"        },
+  { value: "Kit",        label: "Kit" },
   { value: "Acumbamail", label: "Acumbamail" },
 ];
 
 export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClose, onCreate }) {
-  const [step, setStep] = useState("formato"); // "formato" | "plataforma" | "titulo"
-  const [formato, setFormato] = useState(null);
-  const [plataforma, setPlataforma] = useState(null);
-  const [titulo, setTitulo] = useState(ideaTitle || "");
+  const [titulo, setTitulo] = useState("");
+  const [formato, setFormato] = useState("email");
+  const [plataforma, setPlataforma] = useState("Kit");
+  const [contenido, setContenido] = useState({}); // campos varían por formato
+  const [fechaPublicacion, setFechaPublicacion] = useState("");
+  const [urlPublicacion, setUrlPublicacion] = useState("");
+  const [notasInternas, setNotasInternas] = useState("");
   const [saving, setSaving] = useState(false);
   const tituloRef = useRef(null);
 
   useEffect(() => {
+    if (tituloRef.current) tituloRef.current.focus();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Cuando llegamos al paso de título, auto-focus en el input
-  useEffect(() => {
-    if (step === "titulo" && tituloRef.current) {
-      tituloRef.current.focus();
-      tituloRef.current.select();
-    }
-  }, [step]);
-
-  function selectFormato(f) {
-    setFormato(f);
-    if (f === "email") {
-      setStep("plataforma");
-    } else {
-      setStep("titulo");
-    }
+  function setContenidoField(key, value) {
+    setContenido((c) => ({ ...c, [key]: value }));
   }
 
-  function selectPlataforma(p) {
-    setPlataforma(p);
-    setStep("titulo");
-  }
-
-  function goBack() {
-    if (step === "titulo" && formato === "email") setStep("plataforma");
-    else if (step === "titulo") { setStep("formato"); setFormato(null); }
-    else if (step === "plataforma") { setStep("formato"); setFormato(null); }
+  function handleFormatoChange(newFormato) {
+    setFormato(newFormato);
+    if (newFormato !== "email") setPlataforma(null);
+    else if (!plataforma) setPlataforma("Kit");
   }
 
   async function handleSave() {
@@ -76,16 +71,23 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
       tituloRef.current?.focus();
       return;
     }
-    const plataformas = plataforma ? [plataforma] : [];
+    const plataformas = formato === "email" && plataforma ? [plataforma] : [];
+    const payload = {
+      titulo: titulo.trim(),
+      formato,
+      columna: "desarrollo",
+      plataformas,
+      contenido,
+      fecha_publicacion: fechaPublicacion
+        ? new Date(fechaPublicacion).toISOString()
+        : null,
+      url_publicacion: urlPublicacion.trim(),
+      notas: notasInternas.trim(),
+      idea_id: ideaId,
+    };
     try {
       setSaving(true);
-      await onCreate({
-        titulo: titulo.trim(),
-        formato,
-        columna: "desarrollo",
-        plataformas,
-        idea_id: ideaId,
-      });
+      await onCreate(payload);
       onClose();
     } catch (e) {
       alert(`Error al crear: ${e.message || e}`);
@@ -93,16 +95,9 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
     }
   }
 
-  // Título del header según el paso
-  const headerSub = step === "formato"
-    ? "¿QUÉ FORMATO?"
-    : step === "plataforma"
-    ? "¿DÓNDE ENVIARLO?"
-    : "TÍTULO INICIAL";
-
   return (
     <div className="cm-overlay" onClick={onClose}>
-      <div className="cm-panel" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+      <div className="cm-panel np-panel" onClick={(e) => e.stopPropagation()}>
         <span className="br-tr"></span>
         <span className="br-bl"></span>
         <span className="screw tl"></span>
@@ -112,9 +107,13 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
 
         <header className="cm-head">
           <div className="cm-head-l">
-            <span className="cm-kind">{ideaId ? "DAR FORMA" : "NUEVA"}</span>
-            <span className="cm-div">/</span>
-            <span className="cm-title">{headerSub}</span>
+            <span className="cm-kind">NUEVA PIEZA</span>
+            {ideaTitle && (
+              <>
+                <span className="cm-div">·</span>
+                <span className="cm-title">DESDE «{ideaTitle}»</span>
+              </>
+            )}
           </div>
           <div className="cm-head-r">
             <button type="button" className="cm-x" onClick={onClose} title="Cerrar (ESC)">×</button>
@@ -122,91 +121,185 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
         </header>
 
         <div className="cm-body">
-          {/* PASO 1 — Elegir formato */}
-          {step === "formato" && (
-            <div className="np-grid">
+          {/* ─── Título interno ─── */}
+          <label className="np-label">
+            <span className="np-label-tx">Título interno <span style={{ color: "var(--acc)" }}>*</span></span>
+            <input
+              ref={tituloRef}
+              type="text"
+              className="np-input"
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Cómo distingues internamente esta pieza"
+              maxLength={200}
+            />
+          </label>
+
+          {/* ─── Formato ─── */}
+          <div className="np-label">
+            <span className="np-label-tx">Formato</span>
+            <div className="np-chip-row">
               {FORMATOS.map((f) => (
                 <button
                   key={f.value}
                   type="button"
-                  className={`np-option t-${f.value}`}
-                  onClick={() => selectFormato(f.value)}
+                  className={`np-chip t-${f.value} ${formato === f.value ? "on" : ""}`}
+                  onClick={() => handleFormatoChange(f.value)}
                 >
-                  <span className="np-option-icon">{f.icon}</span>
-                  <span className="np-option-label">{f.label}</span>
-                  <span className="np-option-desc">{f.desc}</span>
+                  {f.label}
                 </button>
               ))}
             </div>
-          )}
+          </div>
 
-          {/* PASO 2 — Solo si es email: elegir plataforma */}
-          {step === "plataforma" && (
-            <>
-              <div className="np-breadcrumb">
-                <button type="button" className="np-back" onClick={goBack}>← Email</button>
-              </div>
-              <div className="np-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          {/* ─── Lista de envío (solo email) ─── */}
+          {formato === "email" && (
+            <div className="np-label">
+              <span className="np-label-tx">Lista de envío</span>
+              <div className="np-chip-row">
                 {PLATAFORMAS_EMAIL.map((p) => (
                   <button
                     key={p.value}
                     type="button"
-                    className="np-option"
-                    onClick={() => selectPlataforma(p.value)}
+                    className={`np-chip ${plataforma === p.value ? "on" : ""}`}
+                    onClick={() => setPlataforma(p.value)}
                   >
-                    <span className="np-option-label">{p.label}</span>
+                    {p.label}
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ─── Sección CONTENIDO ─── */}
+          <div className="np-divider"><span>Contenido</span></div>
+
+          {formato === "email" && (
+            <>
+              <label className="np-label">
+                <span className="np-label-tx">Asunto</span>
+                <input
+                  type="text"
+                  className="np-input"
+                  value={contenido.asunto || ""}
+                  onChange={(e) => setContenidoField("asunto", e.target.value)}
+                  placeholder="La línea que abre o no la abre…"
+                />
+              </label>
+              <label className="np-label">
+                <span className="np-label-tx">Preheader</span>
+                <input
+                  type="text"
+                  className="np-input"
+                  value={contenido.preheader || ""}
+                  onChange={(e) => setContenidoField("preheader", e.target.value)}
+                  placeholder="El texto que aparece en la bandeja de entrada…"
+                />
+              </label>
+              <div className="np-label">
+                <span className="np-label-tx">Cuerpo (~500 palabras)</span>
+                <RichTextEditor
+                  initialHtml=""
+                  onChange={(html) => setContenidoField("cuerpo", html)}
+                  placeholder="Escribe aquí…"
+                />
               </div>
             </>
           )}
 
-          {/* PASO 3 — Título inicial */}
-          {step === "titulo" && (
+          {formato === "youtube" && (
             <>
-              <div className="np-breadcrumb">
-                <button type="button" className="np-back" onClick={goBack}>
-                  ← {plataforma ? `${plataforma}` : FORMATOS.find((x) => x.value === formato)?.label}
-                </button>
-              </div>
               <label className="np-label">
-                <span className="np-label-tx">Título</span>
+                <span className="np-label-tx">Título del video</span>
                 <input
-                  ref={tituloRef}
                   type="text"
                   className="np-input"
-                  value={titulo}
-                  onChange={(e) => setTitulo(e.target.value)}
-                  placeholder="Un título de trabajo — luego lo afinas"
-                  maxLength={200}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSave();
-                  }}
+                  value={contenido.titulo_video || ""}
+                  onChange={(e) => setContenidoField("titulo_video", e.target.value)}
+                  placeholder="Cómo se llama el video en YouTube"
                 />
               </label>
-              {ideaTitle && (
-                <p className="np-hint">
-                  Vinculada a la idea: <em>{ideaTitle}</em>
-                </p>
-              )}
+              <div className="np-label">
+                <span className="np-label-tx">Guion</span>
+                <RichTextEditor
+                  initialHtml=""
+                  onChange={(html) => setContenidoField("guion", html)}
+                  placeholder="Escribe el guion aquí…"
+                />
+              </div>
+              <label className="np-label">
+                <span className="np-label-tx">Descripción</span>
+                <textarea
+                  className="np-textarea"
+                  value={contenido.descripcion || ""}
+                  onChange={(e) => setContenidoField("descripcion", e.target.value)}
+                  placeholder="Lo que va debajo del video en YouTube"
+                  rows={4}
+                />
+              </label>
             </>
           )}
+
+          {(formato === "reel" || formato === "relampago" || formato === "grieta") && (
+            <div className="np-label">
+              <span className="np-label-tx">Texto</span>
+              <RichTextEditor
+                initialHtml=""
+                onChange={(html) => setContenidoField("texto", html)}
+                placeholder="Escribe aquí…"
+              />
+            </div>
+          )}
+
+          {/* ─── Sección PUBLICACIÓN ─── */}
+          <div className="np-divider"><span>Publicación</span></div>
+
+          <div className="np-row-2">
+            <label className="np-label">
+              <span className="np-label-tx">Fecha de publicación</span>
+              <input
+                type="datetime-local"
+                className="np-input"
+                value={fechaPublicacion}
+                onChange={(e) => setFechaPublicacion(e.target.value)}
+              />
+            </label>
+            <label className="np-label">
+              <span className="np-label-tx">URL publicación</span>
+              <input
+                type="url"
+                className="np-input"
+                value={urlPublicacion}
+                onChange={(e) => setUrlPublicacion(e.target.value)}
+                placeholder="https://…"
+              />
+            </label>
+          </div>
+
+          <label className="np-label">
+            <span className="np-label-tx">Notas internas</span>
+            <textarea
+              className="np-textarea"
+              value={notasInternas}
+              onChange={(e) => setNotasInternas(e.target.value)}
+              placeholder="Notas de producción, referencias, lo que sea…"
+              rows={4}
+            />
+          </label>
         </div>
 
         <footer className="cm-foot">
           <button type="button" className="cm-btn" onClick={onClose} disabled={saving}>
             Cancelar
           </button>
-          {step === "titulo" && (
-            <button
-              type="button"
-              className="cm-btn cm-btn-primary"
-              onClick={handleSave}
-              disabled={saving || !titulo.trim()}
-            >
-              {saving ? "Creando…" : "Crear pieza"}
-            </button>
-          )}
+          <button
+            type="button"
+            className="cm-btn cm-btn-primary"
+            onClick={handleSave}
+            disabled={saving || !titulo.trim()}
+          >
+            {saving ? "Guardando…" : "Guardar pieza"}
+          </button>
         </footer>
       </div>
     </div>

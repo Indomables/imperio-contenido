@@ -27,6 +27,8 @@ import {
 import CardModal from "../components/CardModal";
 import NuevaIdeaModal from "../components/NuevaIdeaModal";
 import NuevaPiezaModal from "../components/NuevaPiezaModal";
+import KitIdModal from "../components/KitIdModal";
+import MetricasManualesModal from "../components/MetricasManualesModal";
 import { usePageStatus } from "../lib/pageStatus.jsx";
 
 // Carriles de piezas — meta de cada columna del kanban.
@@ -109,6 +111,18 @@ function CalIcon() {
   );
 }
 
+// Icono "estadísticas" (3 barras verticales) — usado en cards de
+// email/relampago publicado para abrir las métricas manuales.
+function StatsIcon() {
+  return (
+    <svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12">
+      <rect x="1"  y="8" width="2.6" height="5" />
+      <rect x="5.7" y="4" width="2.6" height="9" />
+      <rect x="10.4" y="1" width="2.6" height="12" />
+    </svg>
+  );
+}
+
 // ─── Componente ──────────────────────────────────────────────────
 
 export default function Tablero() {
@@ -131,6 +145,12 @@ export default function Tablero() {
   //                    → null si el modal está cerrado
   const [newIdeaOpen, setNewIdeaOpen] = useState(false);
   const [newPiezaContext, setNewPiezaContext] = useState(null);
+  // Mini-modal específico para meter/cambiar el ID de Kit broadcast.
+  // Se abre con el icono ⚡ en cards de email/relampago en columna agendado.
+  const [kitIdModalPieza, setKitIdModalPieza] = useState(null);
+  // Mini-modal para meter métricas manuales (replies + revenue_eur).
+  // Se abre con el icono ▥ (StatsIcon) en cards de email/relampago publicadas.
+  const [metricasModalPieza, setMetricasModalPieza] = useState(null);
 
   const reload = useCallback(async () => {
     try {
@@ -456,6 +476,29 @@ export default function Tablero() {
                     className={`kcard ${hasPiezas ? "" : "no-piezas"}`}
                     onClick={() => setSelected({ kind: "idea", data: idea })}
                   >
+                    {/* Acciones en hover (esquina superior derecha):
+                        ✎ editar → abre CardModal directamente en modo edición
+                        ✕ eliminar → confirm y delete */}
+                    <div className="kcard-actions">
+                      <button
+                        className="kcard-act"
+                        title="Editar idea"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected({ kind: "idea", data: idea, startEditing: true });
+                        }}
+                      >✎</button>
+                      <button
+                        className="kcard-act kcard-act-del"
+                        title="Eliminar idea"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`¿Eliminar la idea "${idea.titulo || "(sin título)"}"?`)) {
+                            handleDelete("idea", idea.id);
+                          }
+                        }}
+                      >✕</button>
+                    </div>
                     <div className="nm">{idea.titulo || "(sin título)"}</div>
                     {excerpt && (
                       <div className="excerpt">{excerpt}</div>
@@ -571,6 +614,51 @@ export default function Tablero() {
                         onDragStart={(e) => handleDragStart(e, p)}
                         onClick={() => setSelected({ kind: "pieza", data: p })}
                       >
+                        {/* Acciones en hover.
+                            📊 solo en email/relampago publicado — métricas manuales.
+                            ⚡ solo en email/relampago agendado — ID de Kit. */}
+                        <div className="kcard-actions">
+                          {c.columna === "publicado" && (p.formato === "email" || p.formato === "relampago") && (
+                            <button
+                              className="kcard-act"
+                              title="Métricas manuales (respuestas + revenue)"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMetricasModalPieza(p);
+                              }}
+                            ><StatsIcon /></button>
+                          )}
+                          {c.columna === "agendado" && (p.formato === "email" || p.formato === "relampago") && (
+                            <button
+                              className={`kcard-act kcard-act-kit ${p.kit_broadcast_id ? "linked" : ""}`}
+                              title={p.kit_broadcast_id
+                                ? `Kit broadcast ${p.kit_broadcast_id} — click para cambiar`
+                                : "Añadir ID del broadcast de Kit"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setKitIdModalPieza(p);
+                              }}
+                            >⚡</button>
+                          )}
+                          <button
+                            className="kcard-act"
+                            title="Editar"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelected({ kind: "pieza", data: p, startEditing: true });
+                            }}
+                          >✎</button>
+                          <button
+                            className="kcard-act kcard-act-del"
+                            title="Eliminar"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`¿Eliminar la pieza "${p.titulo || "(sin título)"}"?`)) {
+                                handleDelete("pieza", p.id);
+                              }
+                            }}
+                          >✕</button>
+                        </div>
                         <span className={`kbadge t-${p.formato} ${isRelampago ? "special relampago" : ""}`}>
                           {FORMATO_LABEL[p.formato] || p.formato}
                         </span>
@@ -586,23 +674,6 @@ export default function Tablero() {
                           <div className={`kdate ${isFuture(p.fecha_publicacion) ? "future" : "past"}`}>
                             <CalIcon />
                             {formatKdate(p.fecha_publicacion, true)}
-                          </div>
-                        )}
-
-                        {/* Indicador Kit broadcast ID — solo para emails agendados.
-                            Si está vinculado → badge verde con el ID. Sin vincular → warning.
-                            Click abre el CardModal donde se edita. */}
-                        {p.formato === "email" && c.columna === "agendado" && (
-                          <div
-                            className={`kit-link ${p.kit_broadcast_id ? "linked" : "unlinked"}`}
-                            title={p.kit_broadcast_id
-                              ? `Vinculado al broadcast ${p.kit_broadcast_id}. Click para editar.`
-                              : "Falta el ID del broadcast de Kit. Click para añadirlo."}
-                          >
-                            <span className="kit-link-icon">{p.kit_broadcast_id ? "✓" : "⚠"}</span>
-                            <span className="kit-link-tx">
-                              {p.kit_broadcast_id ? `KIT · ${p.kit_broadcast_id}` : "VINCULAR KIT"}
-                            </span>
                           </div>
                         )}
 
@@ -628,7 +699,6 @@ export default function Tablero() {
           data={selected.data}
           onClose={() => setSelected(null)}
           onUpdate={(patch) => handleUpdate(selected.kind, selected.data.id, patch)}
-          onDelete={() => handleDelete(selected.kind, selected.data.id)}
         />
       )}
 
@@ -645,6 +715,23 @@ export default function Tablero() {
           ideaTitle={newPiezaContext.ideaTitle || null}
           onClose={() => setNewPiezaContext(null)}
           onCreate={handleCreatePieza}
+        />
+      )}
+
+      {kitIdModalPieza && (
+        <KitIdModal
+          pieza={kitIdModalPieza}
+          onClose={() => setKitIdModalPieza(null)}
+          onSave={async (newId) => {
+            await handleUpdate("pieza", kitIdModalPieza.id, { kit_broadcast_id: newId });
+          }}
+        />
+      )}
+
+      {metricasModalPieza && (
+        <MetricasManualesModal
+          pieza={metricasModalPieza}
+          onClose={() => setMetricasModalPieza(null)}
         />
       )}
     </>

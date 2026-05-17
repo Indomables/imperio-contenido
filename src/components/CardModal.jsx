@@ -1,90 +1,86 @@
 /**
- * CardModal — Detalle y edición de una idea o pieza.
+ * CardModal — Modal para editar una idea o una pieza ya existente.
  *
- * Modo lectura (default): muestra contenido HTML rendered.
- * Modo edición: textareas raw editables → guardar persiste vía API.
+ * Reemplaza al CardModal anterior que tenía modo lectura + edición.
+ * Ahora arranca SIEMPRE en edición (esa es la única razón para abrirlo
+ * desde el ✎ de la card).
  *
- * Para piezas, el contenido depende del formato:
- *  · email      → { asunto, preheader, cuerpo }
- *  · youtube    → { titulo_video, guion, descripcion }
- *  · reel       → { texto }
- *  · relampago  → { texto }
- *  · grieta     → { texto }
+ * Para ver una idea/pieza, el contenido ya está visible en la card del
+ * Tablero (título, excerpt, fecha, etc.) — abrir el modal es para tocar.
+ *
+ * Layout idéntico al NuevaPiezaModal:
+ *   · header con badge del formato
+ *   · campos pre-poblados con los datos actuales
+ *   · misma estructura por formato:
+ *       email     → asunto, preheader, cuerpo (RichTextEditor)
+ *       youtube   → título del video, descripción, guion (~7 min, RTE)
+ *       reel|relampago|grieta → texto (RTE)
+ *   · fecha publicación + URL publicación + notas internas
+ *
+ * El Kit broadcast ID NO está aquí — se edita con el ⚡ de la card.
+ * Eliminar tampoco — se hace con el ✕ de la card.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import RichTextEditor from "./RichTextEditor";
 
 const FORMATO_LABEL = {
-  email: "Email", youtube: "YouTube", reel: "Reel",
-  relampago: "Relámpago", grieta: "Grieta",
+  email:     "EMAIL",
+  reel:      "REEL",
+  relampago: "RELÁMPAGO",
+  youtube:   "YOUTUBE",
+  grieta:    "GRIETA",
 };
 
-const COLUMNAS = ["desarrollo", "listo", "agendado", "publicado"];
-
-export default function CardModal({ kind, data, onClose, onUpdate, onDelete }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(null);
+export default function CardModal({ kind, data, onClose, onUpdate }) {
+  // Reset del state cada vez que cambia la pieza/idea seleccionada
+  const [draft, setDraft] = useState(() => initialDraft(kind, data));
   const [saving, setSaving] = useState(false);
+  const tituloRef = useRef(null);
 
   useEffect(() => {
-    // ESC cierra
+    setDraft(initialDraft(kind, data));
+  }, [kind, data]);
+
+  useEffect(() => {
+    if (tituloRef.current) tituloRef.current.focus();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Reset draft cuando cambia la data subyacente
-  useEffect(() => {
-    if (kind === "idea") {
-      setDraft({
-        titulo: data.titulo || "",
-        notas: data.notas || "",
-        notas_internas: data.notas_internas || "",
-      });
-    } else {
-      setDraft({
-        titulo: data.titulo || "",
-        formato: data.formato,
-        columna: data.columna,
-        contenido: data.contenido || {},
-        notas: data.notas || "",
-        tematica: data.tematica || "",
-        fecha_publicacion: data.fecha_publicacion || "",
-        url_publicacion: data.url_publicacion || "",
-        kit_broadcast_id: data.kit_broadcast_id || "",
-      });
-    }
-  }, [data, kind]);
-
-  if (!draft) return null;
-
-  async function handleSave() {
-    try {
-      setSaving(true);
-      await onUpdate(draft);
-      setEditing(false);
-    } catch (e) {
-      alert(`Error al guardar: ${e.message || e}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   function setField(key, value) {
     setDraft((d) => ({ ...d, [key]: value }));
   }
-
   function setContenidoField(key, value) {
     setDraft((d) => ({ ...d, contenido: { ...d.contenido, [key]: value } }));
   }
 
-  const title = kind === "idea"
-    ? data.titulo || "(idea sin título)"
-    : `${FORMATO_LABEL[data.formato] || data.formato} · ${data.titulo || "(sin título)"}`;
+  async function handleSave() {
+    if (!draft.titulo?.trim()) {
+      tituloRef.current?.focus();
+      return;
+    }
+    try {
+      setSaving(true);
+      // Para idea: solo enviamos los campos editables (titulo, notas, notas_internas)
+      // Para pieza: el draft tiene todos los campos. Conservamos lo que ya
+      // tenía la pieza (kit_broadcast_id, columna, plataformas, idea_id, etc.)
+      // que no se modifican aquí.
+      await onUpdate(draft);
+      onClose();
+    } catch (e) {
+      alert(`Error al guardar: ${e.message || e}`);
+      setSaving(false);
+    }
+  }
+
+  const isPieza = kind === "pieza";
+  const formatoBadge = isPieza ? FORMATO_LABEL[draft.formato] || draft.formato : null;
 
   return (
     <div className="cm-overlay" onClick={onClose}>
-      <div className="cm-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="cm-panel np-panel" onClick={(e) => e.stopPropagation()}>
         <span className="br-tr"></span>
         <span className="br-bl"></span>
         <span className="screw tl"></span>
@@ -94,241 +90,247 @@ export default function CardModal({ kind, data, onClose, onUpdate, onDelete }) {
 
         <header className="cm-head">
           <div className="cm-head-l">
-            <span className="cm-kind">{kind === "idea" ? "IDEA" : "PIEZA"}</span>
-            <span className="cm-div">/</span>
-            <span className="cm-title">{title}</span>
+            <span className="cm-kind">{isPieza ? "EDITAR PIEZA" : "EDITAR IDEA"}</span>
+            {isPieza && (
+              <span className={`cm-badge t-${draft.formato}`}>{formatoBadge}</span>
+            )}
           </div>
           <div className="cm-head-r">
-            {!editing ? (
-              <button className="cm-btn" onClick={() => setEditing(true)}>Editar</button>
-            ) : (
-              <>
-                <button className="cm-btn" onClick={() => setEditing(false)} disabled={saving}>Cancelar</button>
-                <button className="cm-btn primary" onClick={handleSave} disabled={saving}>
-                  {saving ? "Guardando…" : "Guardar"}
-                </button>
-              </>
-            )}
-            <button className="cm-btn danger" onClick={onDelete}>Eliminar</button>
-            <button className="cm-close" onClick={onClose} title="Cerrar (ESC)">✕</button>
+            <button type="button" className="cm-x" onClick={onClose} title="Cerrar (ESC)">×</button>
           </div>
         </header>
 
         <div className="cm-body">
-          {kind === "idea" ? (
-            <IdeaForm draft={draft} editing={editing} setField={setField} />
-          ) : (
-            <PiezaForm
-              draft={draft} editing={editing}
-              setField={setField} setContenidoField={setContenidoField}
-            />
-          )}
+          {isPieza
+            ? <PiezaFields draft={draft} setField={setField} setContenidoField={setContenidoField} tituloRef={tituloRef} />
+            : <IdeaFields draft={draft} setField={setField} tituloRef={tituloRef} />
+          }
         </div>
 
         <footer className="cm-foot">
-          <span className="cm-meta">ID · {data.id}</span>
-          <span className="cm-meta">
-            ACT · {data.updated_at ? new Date(data.updated_at).toLocaleString("es-ES") : "—"}
-          </span>
+          <button type="button" className="cm-btn" onClick={onClose} disabled={saving}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="cm-btn cm-btn-primary"
+            onClick={handleSave}
+            disabled={saving || !draft.titulo?.trim()}
+          >
+            {saving ? "Guardando…" : isPieza ? "Guardar pieza" : "Guardar idea"}
+          </button>
         </footer>
       </div>
     </div>
   );
 }
 
-function Field({ label, children }) {
-  return (
-    <div className="cm-field">
-      <div className="cm-label">{label}</div>
-      <div className="cm-value">{children}</div>
-    </div>
-  );
+// ─── Helpers ────────────────────────────────────────────────────
+
+function initialDraft(kind, data) {
+  if (kind === "idea") {
+    return {
+      titulo:         data.titulo || "",
+      notas:          data.notas || "",
+      notas_internas: data.notas_internas || "",
+    };
+  }
+  // Pieza — preservamos los campos NO editables aquí (kit_broadcast_id,
+  // columna, plataformas, idea_id) para que el PATCH no los pise a null.
+  return {
+    titulo:            data.titulo || "",
+    formato:           data.formato,
+    columna:           data.columna,
+    plataformas:       data.plataformas || [],
+    contenido:         data.contenido || {},
+    fecha_publicacion: data.fecha_publicacion || "",
+    url_publicacion:   data.url_publicacion || "",
+    notas:             data.notas || "",
+    tematica:          data.tematica || "",
+    kit_broadcast_id:  data.kit_broadcast_id || "",
+    idea_id:           data.idea_id || null,
+  };
 }
 
-function ReadHtml({ html }) {
-  if (!html) return <span className="cm-empty">—</span>;
-  return <div className="cm-html" dangerouslySetInnerHTML={{ __html: html }} />;
-}
+// ─── IDEA ───────────────────────────────────────────────────────
 
-function IdeaForm({ draft, editing, setField }) {
+function IdeaFields({ draft, setField, tituloRef }) {
   return (
     <>
-      <Field label="Título">
-        {editing ? (
-          <input className="cm-input" value={draft.titulo} onChange={(e) => setField("titulo", e.target.value)} />
-        ) : (
-          <div className="cm-text">{draft.titulo || <span className="cm-empty">(sin título)</span>}</div>
-        )}
-      </Field>
-      <Field label="Notas">
-        {editing ? (
-          <textarea className="cm-textarea" rows={14} value={draft.notas} onChange={(e) => setField("notas", e.target.value)} />
-        ) : (
-          <ReadHtml html={draft.notas} />
-        )}
-      </Field>
-      <Field label="Notas internas">
-        {editing ? (
-          <textarea className="cm-textarea" rows={6} value={draft.notas_internas} onChange={(e) => setField("notas_internas", e.target.value)} />
-        ) : (
-          draft.notas_internas
-            ? <div className="cm-text" style={{ whiteSpace: "pre-wrap" }}>{draft.notas_internas}</div>
-            : <span className="cm-empty">—</span>
-        )}
-      </Field>
+      <label className="np-label">
+        <span className="np-label-tx">Título <span style={{ color: "var(--acc)" }}>*</span></span>
+        <input
+          ref={tituloRef}
+          type="text"
+          className="np-input"
+          value={draft.titulo}
+          onChange={(e) => setField("titulo", e.target.value)}
+          placeholder="El núcleo de la idea, en una línea"
+          maxLength={200}
+        />
+      </label>
+
+      <label className="np-label">
+        <span className="np-label-tx">Copy</span>
+        <textarea
+          className="np-textarea"
+          value={draft.notas}
+          onChange={(e) => setField("notas", e.target.value)}
+          placeholder="El desarrollo de la idea…"
+          rows={6}
+        />
+      </label>
+
+      <label className="np-label">
+        <span className="np-label-tx">Notas internas</span>
+        <textarea
+          className="np-textarea"
+          value={draft.notas_internas}
+          onChange={(e) => setField("notas_internas", e.target.value)}
+          placeholder="Apuntes solo para ti — origen, referencias, contexto…"
+          rows={3}
+        />
+      </label>
     </>
   );
 }
 
-function PiezaForm({ draft, editing, setField, setContenidoField }) {
+// ─── PIEZA ──────────────────────────────────────────────────────
+
+function PiezaFields({ draft, setField, setContenidoField, tituloRef }) {
   const c = draft.contenido || {};
+  const f = draft.formato;
+  // Etiqueta del guion: incluye duración orientativa para YouTube
+  const guionLabel = f === "youtube" ? "Guion (~7 min)" : "Guion";
+
   return (
     <>
-      <div className="cm-row">
-        <Field label="Título">
-          {editing ? (
-            <input className="cm-input" value={draft.titulo} onChange={(e) => setField("titulo", e.target.value)} />
-          ) : (
-            <div className="cm-text">{draft.titulo || <span className="cm-empty">(sin título)</span>}</div>
-          )}
-        </Field>
-        <Field label="Columna">
-          {editing ? (
-            <select className="cm-input" value={draft.columna} onChange={(e) => setField("columna", e.target.value)}>
-              {COLUMNAS.map((col) => <option key={col} value={col}>{col}</option>)}
-            </select>
-          ) : (
-            <div className="cm-text">{draft.columna}</div>
-          )}
-        </Field>
-      </div>
+      <label className="np-label">
+        <span className="np-label-tx">Título interno <span style={{ color: "var(--acc)" }}>*</span></span>
+        <input
+          ref={tituloRef}
+          type="text"
+          className="np-input"
+          value={draft.titulo}
+          onChange={(e) => setField("titulo", e.target.value)}
+          placeholder="Cómo distingues internamente esta pieza"
+          maxLength={200}
+        />
+      </label>
 
-      {draft.formato === "email" && (
+      <div className="np-divider"><span>Contenido</span></div>
+
+      {f === "email" && (
         <>
-          <Field label="Asunto">
-            {editing ? (
-              <input className="cm-input" value={c.asunto || ""} onChange={(e) => setContenidoField("asunto", e.target.value)} />
-            ) : (
-              <div className="cm-text">{c.asunto || <span className="cm-empty">—</span>}</div>
-            )}
-          </Field>
-          <Field label="Preheader">
-            {editing ? (
-              <input className="cm-input" value={c.preheader || ""} onChange={(e) => setContenidoField("preheader", e.target.value)} />
-            ) : (
-              <div className="cm-text">{c.preheader || <span className="cm-empty">—</span>}</div>
-            )}
-          </Field>
-          <Field label="Cuerpo">
-            {editing ? (
-              <textarea className="cm-textarea" rows={18} value={c.cuerpo || ""} onChange={(e) => setContenidoField("cuerpo", e.target.value)} />
-            ) : (
-              <ReadHtml html={c.cuerpo} />
-            )}
-          </Field>
-        </>
-      )}
-
-      {draft.formato === "youtube" && (
-        <>
-          <Field label="Título del video">
-            {editing ? (
-              <input className="cm-input" value={c.titulo_video || ""} onChange={(e) => setContenidoField("titulo_video", e.target.value)} />
-            ) : (
-              <div className="cm-text">{c.titulo_video || <span className="cm-empty">—</span>}</div>
-            )}
-          </Field>
-          <Field label="Guion">
-            {editing ? (
-              <textarea className="cm-textarea" rows={20} value={c.guion || ""} onChange={(e) => setContenidoField("guion", e.target.value)} />
-            ) : (
-              <ReadHtml html={c.guion} />
-            )}
-          </Field>
-          <Field label="Descripción">
-            {editing ? (
-              <textarea className="cm-textarea" rows={4} value={c.descripcion || ""} onChange={(e) => setContenidoField("descripcion", e.target.value)} />
-            ) : (
-              c.descripcion ? <div className="cm-text" style={{ whiteSpace: "pre-wrap" }}>{c.descripcion}</div> : <span className="cm-empty">—</span>
-            )}
-          </Field>
-        </>
-      )}
-
-      {(draft.formato === "reel" || draft.formato === "relampago" || draft.formato === "grieta") && (
-        <Field label="Texto">
-          {editing ? (
-            <textarea className="cm-textarea" rows={16} value={c.texto || ""} onChange={(e) => setContenidoField("texto", e.target.value)} />
-          ) : (
-            <ReadHtml html={c.texto} />
-          )}
-        </Field>
-      )}
-
-      <div className="cm-row">
-        <Field label="Fecha publicación">
-          {editing ? (
-            <input className="cm-input" type="datetime-local"
-              value={draft.fecha_publicacion ? new Date(draft.fecha_publicacion).toISOString().slice(0, 16) : ""}
-              onChange={(e) => setField("fecha_publicacion", e.target.value ? new Date(e.target.value).toISOString() : null)} />
-          ) : (
-            <div className="cm-text">
-              {draft.fecha_publicacion
-                ? new Date(draft.fecha_publicacion).toLocaleString("es-ES")
-                : <span className="cm-empty">—</span>}
-            </div>
-          )}
-        </Field>
-        <Field label="URL publicación">
-          {editing ? (
-            <input className="cm-input" value={draft.url_publicacion} onChange={(e) => setField("url_publicacion", e.target.value)} />
-          ) : (
-            draft.url_publicacion
-              ? <a className="cm-text" style={{ color: "var(--acc)" }} href={draft.url_publicacion} target="_blank" rel="noreferrer">{draft.url_publicacion}</a>
-              : <span className="cm-empty">—</span>
-          )}
-        </Field>
-      </div>
-
-      {/* Kit broadcast ID — solo para emails. Conecta la pieza con el
-          broadcast real de Kit para que auto-publish.mts pueda mover
-          la pieza a "publicado" automáticamente y refrescar métricas.
-          Acepta el ID "legacy" que ve Soma en Kit; auto-publish lo
-          normalizará al ID real en su próximo run horario. */}
-      {draft.formato === "email" && (
-        <Field label="Kit broadcast ID">
-          {editing ? (
+          <label className="np-label">
+            <span className="np-label-tx">Asunto</span>
             <input
-              className="cm-input"
-              value={draft.kit_broadcast_id}
-              onChange={(e) => setField("kit_broadcast_id", e.target.value.trim())}
-              placeholder="ej. 24121294"
+              type="text"
+              className="np-input"
+              value={c.asunto || ""}
+              onChange={(e) => setContenidoField("asunto", e.target.value)}
+              placeholder="La línea que abre o no la abre…"
             />
-          ) : (
-            <div className="cm-text">
-              {draft.kit_broadcast_id || <span className="cm-empty">— sin vincular —</span>}
-            </div>
-          )}
-        </Field>
+          </label>
+          <label className="np-label">
+            <span className="np-label-tx">Preheader</span>
+            <input
+              type="text"
+              className="np-input"
+              value={c.preheader || ""}
+              onChange={(e) => setContenidoField("preheader", e.target.value)}
+              placeholder="El texto que aparece en la bandeja de entrada…"
+            />
+          </label>
+          <div className="np-label">
+            <span className="np-label-tx">Cuerpo (~500 palabras)</span>
+            <RichTextEditor
+              initialHtml={c.cuerpo || ""}
+              onChange={(html) => setContenidoField("cuerpo", html)}
+              placeholder="Escribe aquí…"
+            />
+          </div>
+        </>
       )}
 
-      <Field label="Temática">
-        {editing ? (
-          <input className="cm-input" value={draft.tematica} onChange={(e) => setField("tematica", e.target.value)} />
-        ) : (
-          <div className="cm-text">{draft.tematica || <span className="cm-empty">—</span>}</div>
-        )}
-      </Field>
+      {f === "youtube" && (
+        <>
+          <label className="np-label">
+            <span className="np-label-tx">Título del vídeo</span>
+            <input
+              type="text"
+              className="np-input"
+              value={c.titulo_video || ""}
+              onChange={(e) => setContenidoField("titulo_video", e.target.value)}
+              placeholder="Cómo se llama el video en YouTube"
+            />
+          </label>
+          <label className="np-label">
+            <span className="np-label-tx">Descripción</span>
+            <textarea
+              className="np-textarea"
+              value={c.descripcion || ""}
+              onChange={(e) => setContenidoField("descripcion", e.target.value)}
+              placeholder="Descripción del vídeo…"
+              rows={4}
+            />
+          </label>
+          <div className="np-label">
+            <span className="np-label-tx">{guionLabel}</span>
+            <RichTextEditor
+              initialHtml={c.guion || ""}
+              onChange={(html) => setContenidoField("guion", html)}
+              placeholder="Escribe el guion aquí…"
+            />
+          </div>
+        </>
+      )}
 
-      <Field label="Notas internas">
-        {editing ? (
-          <textarea className="cm-textarea" rows={4} value={draft.notas} onChange={(e) => setField("notas", e.target.value)} />
-        ) : (
-          draft.notas
-            ? <div className="cm-text" style={{ whiteSpace: "pre-wrap" }}>{draft.notas}</div>
-            : <span className="cm-empty">—</span>
-        )}
-      </Field>
+      {(f === "reel" || f === "relampago" || f === "grieta") && (
+        <div className="np-label">
+          <span className="np-label-tx">Texto</span>
+          <RichTextEditor
+            initialHtml={c.texto || ""}
+            onChange={(html) => setContenidoField("texto", html)}
+            placeholder="Escribe aquí…"
+          />
+        </div>
+      )}
+
+      <div className="np-divider"><span>Publicación</span></div>
+
+      <div className="np-row-2">
+        <label className="np-label">
+          <span className="np-label-tx">Fecha de publicación</span>
+          <input
+            type="datetime-local"
+            className="np-input"
+            value={draft.fecha_publicacion ? new Date(draft.fecha_publicacion).toISOString().slice(0, 16) : ""}
+            onChange={(e) => setField("fecha_publicacion", e.target.value ? new Date(e.target.value).toISOString() : null)}
+          />
+        </label>
+        <label className="np-label">
+          <span className="np-label-tx">URL publicación</span>
+          <input
+            type="url"
+            className="np-input"
+            value={draft.url_publicacion}
+            onChange={(e) => setField("url_publicacion", e.target.value)}
+            placeholder="https://…"
+          />
+        </label>
+      </div>
+
+      <label className="np-label">
+        <span className="np-label-tx">Notas internas</span>
+        <textarea
+          className="np-textarea"
+          value={draft.notas}
+          onChange={(e) => setField("notas", e.target.value)}
+          placeholder="Notas de producción, referencias, lo que sea…"
+          rows={4}
+        />
+      </label>
     </>
   );
 }
