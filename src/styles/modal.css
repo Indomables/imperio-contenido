@@ -567,6 +567,22 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   min-width: 0; flex: 1;
 }
+
+/* Mini-badge del tipo de pieza en el header (modo edición).
+   Usa los mismos colores que .mchip.t-*.on pero más compacto. */
+.somal-h-badge {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em;
+  font-weight: 500; text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.somal-h-badge.t-email     { color: var(--acc);            border-color: oklch(from var(--acc) l c h / 0.55);  background: var(--acc-bg2); }
+.somal-h-badge.t-reel      { color: oklch(0.78 0.18 50);   border-color: oklch(0.78 0.18 50 / 0.55);           background: oklch(0.78 0.18 50 / 0.10); }
+.somal-h-badge.t-relampago { color: oklch(0.78 0.18 245);  border-color: oklch(0.78 0.18 245 / 0.55);          background: oklch(0.78 0.18 245 / 0.10); }
+.somal-h-badge.t-youtube   { color: oklch(0.68 0.22 25);   border-color: oklch(0.68 0.22 25 / 0.55);           background: oklch(0.68 0.22 25 / 0.10); }
+.somal-h-badge.t-grieta    { color: oklch(0.78 0.20 350);  border-color: oklch(0.78 0.20 350 / 0.55);          background: oklch(0.78 0.20 350 / 0.10); }
+.somal-h-badge.t-idea      { color: var(--ink-2);          border-color: var(--line-2);                        background: var(--bg-1); }
 .somal-h .r { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 .somal-h .meta {
   font-family: var(--mono); font-size: 9.5px;

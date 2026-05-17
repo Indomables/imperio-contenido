@@ -1,28 +1,25 @@
 /**
  * CardModal — Modal para editar una idea o una pieza ya existente.
  *
- * Reemplaza al CardModal anterior que tenía modo lectura + edición.
- * Ahora arranca SIEMPRE en edición (esa es la única razón para abrirlo
- * desde el ✎ de la card).
+ * Usa los mismos primitivos Soma OS HUD que NuevaPiezaModal (chasis,
+ * LED pulsante, reloj SYNC, secciones numeradas, footer statusbar).
+ * Diferencias respecto a la creación:
+ *   · ix del header = "EDIT" en lugar de "00"
+ *   · header lleva un badge del formato actual a la izquierda
+ *   · no se ofrece cambio de formato ni de lista de envío
+ *     (la pieza ya nació con esos parámetros — para alterarlos hay
+ *     que eliminar y recrear; mantenerlos editables solo crearía
+ *     inconsistencias entre `formato` y los campos de `contenido`)
+ *   · footer dice CHANGED/UNCHANGED según haya tocado algo
+ *   · sin autoguarda (al editar guardas al pulsar el botón)
  *
- * Para ver una idea/pieza, el contenido ya está visible en la card del
- * Tablero (título, excerpt, fecha, etc.) — abrir el modal es para tocar.
+ * El campo `kit_broadcast_id` NO se toca aquí — se gestiona con el
+ * icono ⚡ de la card. Eliminar tampoco — se hace con el ✕ de la card.
  *
- * Layout idéntico al NuevaPiezaModal:
- *   · header con badge del formato
- *   · campos pre-poblados con los datos actuales
- *   · misma estructura por formato:
- *       email     → asunto, preheader, cuerpo (RichTextEditor)
- *       youtube   → título del video, descripción, guion (~7 min, RTE)
- *       reel|relampago|grieta → texto (RTE)
- *   · fecha publicación + URL publicación + notas internas
- *
- * El Kit broadcast ID NO está aquí — se edita con el ⚡ de la card.
- * Eliminar tampoco — se hace con el ✕ de la card.
+ * Se abre con kind = "idea" o "pieza".
  */
 
-import { useState, useEffect, useRef } from "react";
-import RichTextEditor from "./RichTextEditor";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 
 const FORMATO_LABEL = {
   email:     "EMAIL",
@@ -33,21 +30,35 @@ const FORMATO_LABEL = {
 };
 
 export default function CardModal({ kind, data, onClose, onUpdate }) {
-  // Reset del state cada vez que cambia la pieza/idea seleccionada
+  // El draft inicial depende del kind. Preservamos campos no editables
+  // (kit_broadcast_id, columna, plataformas, idea_id, tematica) para que
+  // el PATCH no los pise a null si el backend no los recibe.
   const [draft, setDraft] = useState(() => initialDraft(kind, data));
   const [saving, setSaving] = useState(false);
+  const [clockNow, setClockNow] = useState(formatClock(new Date()));
   const tituloRef = useRef(null);
+  const editorRef = useRef(null);
 
+  // Reset si el dato seleccionado cambia (ej: drag de pieza + reabrir)
   useEffect(() => {
     setDraft(initialDraft(kind, data));
   }, [kind, data]);
 
+  // Foco inicial + ESC para cerrar
   useEffect(() => {
     if (tituloRef.current) tituloRef.current.focus();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Reloj SYNC vivo
+  useEffect(() => {
+    const id = setInterval(() => setClockNow(formatClock(new Date())), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const isPieza = kind === "pieza";
 
   function setField(key, value) {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -56,6 +67,13 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
     setDraft((d) => ({ ...d, contenido: { ...d.contenido, [key]: value } }));
   }
 
+  // Métricas para el footer
+  const editorText = isPieza ? getEditorText(draft.formato, draft.contenido) : (draft.notas || "");
+  const wordCount = countWords(editorText);
+  const readingMin = Math.max(0, Math.round((wordCount / 220) * 10) / 10);
+  const requeridosLeft = draft.titulo?.trim() ? 0 : 1;
+  const changedState = hasChanges(kind, data, draft) ? "MODIFICADO" : "SIN CAMBIOS";
+
   async function handleSave() {
     if (!draft.titulo?.trim()) {
       tituloRef.current?.focus();
@@ -63,10 +81,6 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
     }
     try {
       setSaving(true);
-      // Para idea: solo enviamos los campos editables (titulo, notas, notas_internas)
-      // Para pieza: el draft tiene todos los campos. Conservamos lo que ya
-      // tenía la pieza (kit_broadcast_id, columna, plataformas, idea_id, etc.)
-      // que no se modifican aquí.
       await onUpdate(draft);
       onClose();
     } catch (e) {
@@ -75,49 +89,386 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
     }
   }
 
-  const isPieza = kind === "pieza";
-  const formatoBadge = isPieza ? FORMATO_LABEL[draft.formato] || draft.formato : null;
+  // Header — para pieza: "EDIT · [FORMATO] · «Título»"; para idea: "EDIT · IDEA · «Título»"
+  const headerBadge = isPieza ? FORMATO_LABEL[draft.formato] || draft.formato : "IDEA";
+  const headerBadgeClass = isPieza ? `t-${draft.formato}` : "t-idea";
+  const headerCrumb = `«${(data.titulo || "SIN TÍTULO").toUpperCase()}»`;
 
   return (
-    <div className="cm-overlay" onClick={onClose}>
-      <div className="cm-panel np-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-host" onClick={onClose}>
+      <div className="modal-scrim" />
+      <div className="somal" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="somalTitle">
 
-        <header className="cm-head">
-          <div className="cm-head-l">
-            <span className="cm-kind">{isPieza ? "EDITAR PIEZA" : "EDITAR IDEA"}</span>
-            {isPieza && (
-              <span className={`cm-badge t-${draft.formato}`}>{formatoBadge}</span>
-            )}
+        {/* Chassis HUD */}
+        <span className="s-br tl"></span><span className="s-br tr"></span>
+        <span className="s-br bl"></span><span className="s-br br"></span>
+        <span className="s-screw tl"></span><span className="s-screw tr"></span>
+        <span className="s-screw bl"></span><span className="s-screw br"></span>
+
+        {/* ─── HEADER ─── */}
+        <header className="somal-h">
+          <div className="l">
+            <span className="led"></span>
+            <span className="ix">EDIT</span><span className="div">/</span>
+            <span className="ttl" id="somalTitle">{isPieza ? "Editar Pieza" : "Editar Idea"}</span>
+            <span className="sep">·</span>
+            <span className={`somal-h-badge ${headerBadgeClass}`}>{headerBadge}</span>
+            <span className="sep">·</span>
+            <span className="src">{headerCrumb}</span>
           </div>
-          <div className="cm-head-r">
-            <button type="button" className="cm-x" onClick={onClose} title="Cerrar (ESC)">×</button>
+          <div className="r">
+            <span className="meta">SYNC <b>{clockNow}</b></span>
+            <button type="button" className="somal-x" onClick={onClose} aria-label="Cerrar (ESC)">×</button>
           </div>
         </header>
 
-        <div className="cm-body">
+        {/* ─── BODY ─── */}
+        <div className="somal-body">
           {isPieza
-            ? <PiezaFields draft={draft} setField={setField} setContenidoField={setContenidoField} tituloRef={tituloRef} />
-            : <IdeaFields draft={draft} setField={setField} tituloRef={tituloRef} />
+            ? <PiezaSections draft={draft} setField={setField} setContenidoField={setContenidoField} tituloRef={tituloRef} editorRef={editorRef} requeridosLeft={requeridosLeft} wordCount={wordCount} readingMin={readingMin} />
+            : <IdeaSections draft={draft} setField={setField} tituloRef={tituloRef} requeridosLeft={requeridosLeft} wordCount={wordCount} />
           }
         </div>
 
-        <footer className="cm-foot">
-          <button type="button" className="cm-btn" onClick={onClose} disabled={saving}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="cm-btn cm-btn-primary"
-            onClick={handleSave}
-            disabled={saving || !draft.titulo?.trim()}
-          >
-            {saving ? "Guardando…" : isPieza ? "Guardar pieza" : "Guardar idea"}
-          </button>
+        {/* ─── FOOTER ─── */}
+        <footer className="somal-foot">
+          <div className="l">
+            <span><span className="led"></span>DRAFT · <b>{changedState}</b></span>
+            <span>· <b>{wordCount}</b> {isPieza ? "/ 500 W" : "W"}</span>
+            <span>· REQUERIDOS <b className={requeridosLeft > 0 ? "warn" : "pos"}>{requeridosLeft}</b></span>
+          </div>
+          <div className="r">
+            <button type="button" className="somal-btn ghost" onClick={onClose} disabled={saving}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="somal-btn primary"
+              onClick={handleSave}
+              disabled={saving || requeridosLeft > 0}
+            >
+              {saving ? "Guardando…" : isPieza ? "Guardar pieza →" : "Guardar idea →"}
+            </button>
+          </div>
         </footer>
       </div>
     </div>
   );
 }
+
+// ─── Subcomponentes por kind ────────────────────────────────────
+
+function IdeaSections({ draft, setField, tituloRef, requeridosLeft, wordCount }) {
+  return (
+    <section className="msec">
+      <span className="br-tr"></span><span className="br-bl"></span>
+      <header className="msec-h">
+        <div className="t">
+          <span className="dot"></span>
+          <span className="ix">01</span><span className="div">/</span>
+          <span className="ttl">Identidad</span>
+        </div>
+        <div className="meta">REQUERIDOS <b className={requeridosLeft > 0 ? "acc" : ""}>{requeridosLeft}</b></div>
+      </header>
+      <div className="msec-body">
+
+        <div className="mfield">
+          <label>Título <span className="req">*</span><span className="hint">· el núcleo, en una línea</span></label>
+          <div className="minput">
+            <input
+              ref={tituloRef}
+              type="text"
+              value={draft.titulo}
+              onChange={(e) => setField("titulo", e.target.value)}
+              placeholder="El núcleo de la idea, en una línea"
+              maxLength={200}
+            />
+          </div>
+        </div>
+
+        <div className="mfield">
+          <label>Copy <span className="hint">· el desarrollo</span></label>
+          <div className="minput notes">
+            <textarea
+              value={draft.notas || ""}
+              onChange={(e) => setField("notas", e.target.value)}
+              placeholder="El desarrollo de la idea…"
+              rows={6}
+            />
+          </div>
+        </div>
+
+        <div className="mfield">
+          <label>Notas internas <span className="hint">· origen, referencias, contexto</span></label>
+          <div className="minput notes">
+            <textarea
+              value={draft.notas_internas || ""}
+              onChange={(e) => setField("notas_internas", e.target.value)}
+              placeholder="Apuntes solo para ti…"
+              rows={3}
+            />
+          </div>
+        </div>
+
+      </div>
+    </section>
+  );
+}
+
+function PiezaSections({ draft, setField, setContenidoField, tituloRef, editorRef, requeridosLeft, wordCount, readingMin }) {
+  const ventanaState = draft.fecha_publicacion ? "AGENDADA" : "LIBRE";
+
+  return (
+    <>
+      {/* ═══ 01 · IDENTIDAD ═══ */}
+      <section className="msec">
+        <span className="br-tr"></span><span className="br-bl"></span>
+        <header className="msec-h">
+          <div className="t">
+            <span className="dot"></span>
+            <span className="ix">01</span><span className="div">/</span>
+            <span className="ttl">Identidad</span>
+          </div>
+          <div className="meta">REQUERIDOS <b className={requeridosLeft > 0 ? "acc" : ""}>{requeridosLeft}</b></div>
+        </header>
+        <div className="msec-body">
+          <div className="mfield">
+            <label>Título interno <span className="req">*</span><span className="hint">· cómo distingues esta pieza</span></label>
+            <div className="minput">
+              <input
+                ref={tituloRef}
+                type="text"
+                value={draft.titulo}
+                onChange={(e) => setField("titulo", e.target.value)}
+                placeholder="Cómo distingues internamente esta pieza"
+                maxLength={200}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══ 02 · CONTENIDO ═══ */}
+      <section className="msec">
+        <span className="br-tr"></span><span className="br-bl"></span>
+        <header className="msec-h">
+          <div className="t">
+            <span className="dot"></span>
+            <span className="ix">02</span><span className="div">/</span>
+            <span className="ttl">Contenido</span>
+          </div>
+          <div className="meta"><b>{wordCount}</b> / 500 W · <b>~{readingMin}</b> MIN LECTURA</div>
+        </header>
+        <div className="msec-body">
+          <ContenidoFields
+            formato={draft.formato}
+            contenido={draft.contenido || {}}
+            setContenidoField={setContenidoField}
+            editorRef={editorRef}
+          />
+        </div>
+      </section>
+
+      {/* ═══ 03 · PUBLICACIÓN ═══ */}
+      <section className="msec">
+        <span className="br-tr"></span><span className="br-bl"></span>
+        <header className="msec-h">
+          <div className="t">
+            <span className="dot"></span>
+            <span className="ix">03</span><span className="div">/</span>
+            <span className="ttl">Publicación</span>
+          </div>
+          <div className="meta">VENTANA <b>{ventanaState}</b></div>
+        </header>
+        <div className="msec-body">
+
+          <div className="mrow">
+            <div className="mfield">
+              <label>Fecha · hora de publicación</label>
+              <div className="minput">
+                <input
+                  type="datetime-local"
+                  step="300"
+                  value={draft.fecha_publicacion ? new Date(draft.fecha_publicacion).toISOString().slice(0, 16) : ""}
+                  onChange={(e) => setField("fecha_publicacion", e.target.value ? new Date(e.target.value).toISOString() : null)}
+                />
+              </div>
+            </div>
+            <div className="mfield">
+              <label>URL de publicación <span className="hint">· cuando esté viva</span></label>
+              <div className="minput">
+                <input
+                  type="url"
+                  value={draft.url_publicacion || ""}
+                  onChange={(e) => setField("url_publicacion", e.target.value)}
+                  placeholder="https://…"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mfield">
+            <label>Notas internas <span className="hint">· producción, referencias, lo que sea</span></label>
+            <div className="minput notes">
+              <textarea
+                value={draft.notas || ""}
+                onChange={(e) => setField("notas", e.target.value)}
+                placeholder="Notas, referencias, decisiones tomadas…"
+              />
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ContenidoFields({ formato, contenido, setContenidoField, editorRef }) {
+  if (formato === "email") {
+    return (
+      <>
+        <div className="mfield">
+          <label>Asunto <span className="hint">· la línea que abre o no la abre</span></label>
+          <div className="minput">
+            <input
+              type="text"
+              value={contenido.asunto || ""}
+              onChange={(e) => setContenidoField("asunto", e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Preheader <span className="hint">· lo que se ve en la bandeja</span></label>
+          <div className="minput">
+            <input
+              type="text"
+              value={contenido.preheader || ""}
+              onChange={(e) => setContenidoField("preheader", e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Cuerpo <span className="hint">· objetivo ~500 palabras</span></label>
+          <MeditorEditor
+            html={contenido.cuerpo || ""}
+            onChange={(html) => setContenidoField("cuerpo", html)}
+            placeholder="Escribe aquí…"
+            ref={editorRef}
+          />
+        </div>
+      </>
+    );
+  }
+
+  if (formato === "youtube") {
+    return (
+      <>
+        <div className="mfield">
+          <label>Título del vídeo</label>
+          <div className="minput">
+            <input
+              type="text"
+              value={contenido.titulo_video || ""}
+              onChange={(e) => setContenidoField("titulo_video", e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Descripción</label>
+          <div className="minput notes">
+            <textarea
+              value={contenido.descripcion || ""}
+              onChange={(e) => setContenidoField("descripcion", e.target.value)}
+              placeholder="Descripción del vídeo…"
+            />
+          </div>
+        </div>
+        <div className="mfield">
+          <label>Guion <span className="hint">· ~7 min</span></label>
+          <MeditorEditor
+            html={contenido.guion || ""}
+            onChange={(html) => setContenidoField("guion", html)}
+            placeholder="Escribe el guion aquí…"
+            ref={editorRef}
+          />
+        </div>
+      </>
+    );
+  }
+
+  // reel / relampago / grieta
+  return (
+    <div className="mfield">
+      <label>Texto</label>
+      <MeditorEditor
+        html={contenido.texto || ""}
+        onChange={(html) => setContenidoField("texto", html)}
+        placeholder="Escribe aquí…"
+        ref={editorRef}
+      />
+    </div>
+  );
+}
+
+// ─── Editor inline contentEditable (idéntico al de NuevaPiezaModal) ──
+
+const MeditorEditor = forwardRef(function MeditorEditor({ html, onChange, placeholder }, ref) {
+  const areaRef = useRef(null);
+  const initializedRef = useRef(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!initializedRef.current && areaRef.current) {
+      areaRef.current.innerHTML = html || "";
+      initializedRef.current = true;
+    }
+  }, [html]);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => areaRef.current?.focus(),
+  }));
+
+  function exec(cmd, arg) {
+    document.execCommand(cmd, false, arg);
+    if (areaRef.current) onChange(areaRef.current.innerHTML);
+    areaRef.current?.focus();
+  }
+  function handleInput() {
+    if (areaRef.current) onChange(areaRef.current.innerHTML);
+  }
+  function handlePaste(e) {
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    document.execCommand("insertText", false, text);
+  }
+
+  return (
+    <div className={`meditor ${expanded ? "expanded" : ""}`}>
+      <div className="meditor-toolbar">
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("bold"); }}><b>B</b></button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("italic"); }}><i>I</i></button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("formatBlock", "<h1>"); }}>H1</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("formatBlock", "<h2>"); }}>H2</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("insertUnorderedList"); }}>≡</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("undo"); }}>↶</button>
+        <button type="button" className="tb" onMouseDown={(e) => { e.preventDefault(); exec("insertHorizontalRule"); }}>—</button>
+        <span className="tb-spc"></span>
+        <span className="tb-info">MONO ↔ PROSA</span>
+        <button type="button" className="tb" onClick={() => setExpanded((v) => !v)} title={expanded ? "Reducir" : "Expandir"}>⤢</button>
+      </div>
+      <div
+        ref={areaRef}
+        className="meditor-area"
+        contentEditable
+        suppressContentEditableWarning
+        onInput={handleInput}
+        onPaste={handlePaste}
+        data-placeholder={placeholder}
+      />
+    </div>
+  );
+});
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -129,8 +480,7 @@ function initialDraft(kind, data) {
       notas_internas: data.notas_internas || "",
     };
   }
-  // Pieza — preservamos los campos NO editables aquí (kit_broadcast_id,
-  // columna, plataformas, idea_id) para que el PATCH no los pise a null.
+  // Pieza — preservamos los campos no editables aquí para que el PATCH no los pise.
   return {
     titulo:            data.titulo || "",
     formato:           data.formato,
@@ -146,186 +496,37 @@ function initialDraft(kind, data) {
   };
 }
 
-// ─── IDEA ───────────────────────────────────────────────────────
-
-function IdeaFields({ draft, setField, tituloRef }) {
-  return (
-    <>
-      <label className="np-label">
-        <span className="np-label-tx">Título <span style={{ color: "var(--acc)" }}>*</span></span>
-        <input
-          ref={tituloRef}
-          type="text"
-          className="np-input"
-          value={draft.titulo}
-          onChange={(e) => setField("titulo", e.target.value)}
-          placeholder="El núcleo de la idea, en una línea"
-          maxLength={200}
-        />
-      </label>
-
-      <label className="np-label">
-        <span className="np-label-tx">Copy</span>
-        <textarea
-          className="np-textarea"
-          value={draft.notas}
-          onChange={(e) => setField("notas", e.target.value)}
-          placeholder="El desarrollo de la idea…"
-          rows={6}
-        />
-      </label>
-
-      <label className="np-label">
-        <span className="np-label-tx">Notas internas</span>
-        <textarea
-          className="np-textarea"
-          value={draft.notas_internas}
-          onChange={(e) => setField("notas_internas", e.target.value)}
-          placeholder="Apuntes solo para ti — origen, referencias, contexto…"
-          rows={3}
-        />
-      </label>
-    </>
-  );
+function formatClock(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// ─── PIEZA ──────────────────────────────────────────────────────
+function countWords(text) {
+  if (!text) return 0;
+  const txt = String(text).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return txt ? txt.split(/\s+/).length : 0;
+}
 
-function PiezaFields({ draft, setField, setContenidoField, tituloRef }) {
-  const c = draft.contenido || {};
-  const f = draft.formato;
-  // Etiqueta del guion: incluye duración orientativa para YouTube
-  const guionLabel = f === "youtube" ? "Guion (~7 min)" : "Guion";
+function getEditorText(formato, contenido) {
+  if (!contenido) return "";
+  if (formato === "email") return contenido.cuerpo || "";
+  if (formato === "youtube") return contenido.guion || "";
+  return contenido.texto || "";
+}
 
+function hasChanges(kind, original, draft) {
+  if (kind === "idea") {
+    return (
+      (original.titulo || "") !== (draft.titulo || "") ||
+      (original.notas || "") !== (draft.notas || "") ||
+      (original.notas_internas || "") !== (draft.notas_internas || "")
+    );
+  }
   return (
-    <>
-      <label className="np-label">
-        <span className="np-label-tx">Título interno <span style={{ color: "var(--acc)" }}>*</span></span>
-        <input
-          ref={tituloRef}
-          type="text"
-          className="np-input"
-          value={draft.titulo}
-          onChange={(e) => setField("titulo", e.target.value)}
-          placeholder="Cómo distingues internamente esta pieza"
-          maxLength={200}
-        />
-      </label>
-
-      <div className="np-divider"><span>Contenido</span></div>
-
-      {f === "email" && (
-        <>
-          <label className="np-label">
-            <span className="np-label-tx">Asunto</span>
-            <input
-              type="text"
-              className="np-input"
-              value={c.asunto || ""}
-              onChange={(e) => setContenidoField("asunto", e.target.value)}
-              placeholder="La línea que abre o no la abre…"
-            />
-          </label>
-          <label className="np-label">
-            <span className="np-label-tx">Preheader</span>
-            <input
-              type="text"
-              className="np-input"
-              value={c.preheader || ""}
-              onChange={(e) => setContenidoField("preheader", e.target.value)}
-              placeholder="El texto que aparece en la bandeja de entrada…"
-            />
-          </label>
-          <div className="np-label">
-            <span className="np-label-tx">Cuerpo (~500 palabras)</span>
-            <RichTextEditor
-              initialHtml={c.cuerpo || ""}
-              onChange={(html) => setContenidoField("cuerpo", html)}
-              placeholder="Escribe aquí…"
-            />
-          </div>
-        </>
-      )}
-
-      {f === "youtube" && (
-        <>
-          <label className="np-label">
-            <span className="np-label-tx">Título del vídeo</span>
-            <input
-              type="text"
-              className="np-input"
-              value={c.titulo_video || ""}
-              onChange={(e) => setContenidoField("titulo_video", e.target.value)}
-              placeholder="Cómo se llama el video en YouTube"
-            />
-          </label>
-          <label className="np-label">
-            <span className="np-label-tx">Descripción</span>
-            <textarea
-              className="np-textarea"
-              value={c.descripcion || ""}
-              onChange={(e) => setContenidoField("descripcion", e.target.value)}
-              placeholder="Descripción del vídeo…"
-              rows={4}
-            />
-          </label>
-          <div className="np-label">
-            <span className="np-label-tx">{guionLabel}</span>
-            <RichTextEditor
-              initialHtml={c.guion || ""}
-              onChange={(html) => setContenidoField("guion", html)}
-              placeholder="Escribe el guion aquí…"
-            />
-          </div>
-        </>
-      )}
-
-      {(f === "reel" || f === "relampago" || f === "grieta") && (
-        <div className="np-label">
-          <span className="np-label-tx">Texto</span>
-          <RichTextEditor
-            initialHtml={c.texto || ""}
-            onChange={(html) => setContenidoField("texto", html)}
-            placeholder="Escribe aquí…"
-          />
-        </div>
-      )}
-
-      <div className="np-divider"><span>Publicación</span></div>
-
-      <div className="np-row-2">
-        <label className="np-label">
-          <span className="np-label-tx">Fecha de publicación</span>
-          <input
-            type="datetime-local"
-            className="np-input"
-            step="300"
-            value={draft.fecha_publicacion ? new Date(draft.fecha_publicacion).toISOString().slice(0, 16) : ""}
-            onChange={(e) => setField("fecha_publicacion", e.target.value ? new Date(e.target.value).toISOString() : null)}
-          />
-        </label>
-        <label className="np-label">
-          <span className="np-label-tx">URL publicación</span>
-          <input
-            type="url"
-            className="np-input"
-            value={draft.url_publicacion}
-            onChange={(e) => setField("url_publicacion", e.target.value)}
-            placeholder="https://…"
-          />
-        </label>
-      </div>
-
-      <label className="np-label">
-        <span className="np-label-tx">Notas internas</span>
-        <textarea
-          className="np-textarea"
-          value={draft.notas}
-          onChange={(e) => setField("notas", e.target.value)}
-          placeholder="Notas de producción, referencias, lo que sea…"
-          rows={4}
-        />
-      </label>
-    </>
+    (original.titulo || "") !== (draft.titulo || "") ||
+    (original.url_publicacion || "") !== (draft.url_publicacion || "") ||
+    (original.notas || "") !== (draft.notas || "") ||
+    (original.fecha_publicacion || null) !== (draft.fecha_publicacion || null) ||
+    JSON.stringify(original.contenido || {}) !== JSON.stringify(draft.contenido || {})
   );
 }
