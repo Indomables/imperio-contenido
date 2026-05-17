@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## Fase 5 · Port de auto-publish a Netlify Scheduled · v0.48.0-α (2026-05-17)
+
+**Hito**: La edge function crítica de Supabase (`auto-publish`) está portada
+como Netlify Scheduled Function. Es lo único que necesitaba un cron — las
+otras 5 edge functions son RPC manuales que el frontend nuevo no usa.
+
+### Inventario de edge functions y decisiones
+
+| Edge function (Supabase) | Tipo | Decisión |
+|---|---|---|
+| `auto-publish` v23 | Cron horario | **PORT a Netlify Scheduled** (esta release) |
+| `kit-sync` v7 | RPC manual | **Descartar** — redundante con auto-publish |
+| `instagram-sync` v2 | RPC manual | Deuda técnica — frontend nuevo no la llama |
+| `zernio-sync` v7 | RPC manual | Deuda técnica — frontend nuevo no la llama |
+| `instagram-auth` v3 | OAuth start | Deuda técnica — solo si Soma quiere reconectar IG |
+| `instagram-auth-callback` v1 | OAuth end | Deuda técnica — pareja de la anterior |
+
+### Añadido
+
+**`netlify/functions/auto-publish.mts`** (Scheduled Function):
+- Schedule: `@hourly` (coincide con el "CRON CADA HORA" del UI).
+- Port fiel del código v23 de Supabase, manteniendo:
+  - Resolución de `publication_id` legacy → `broadcast.id` real (normalización
+    persistida en BD).
+  - Mover agendadas → publicadas cuando Kit las publica.
+  - Refresh de métricas de publicadas en últimas 72h (limita carga de API).
+  - Merge de campos en métricas (`replies`, `revenue_eur` se preservan; solo
+    los campos de Kit se sobreescriben).
+- Cambios vs. original:
+  - Lee `KIT_API_KEY_V4` de **env var** de Netlify (idiomático), no de la
+    tabla `settings`.
+  - Soporta `CRON_SECRET` opcional + header `x-netlify-event: schedule` para
+    el scheduler interno.
+  - SQL directo con `db.sql` en lugar de cliente supabase-js.
+  - TypeScript tipado (estructuras `KitBroadcast`, `KitStats`, `Metricas`).
+
+### Cambios operativos para Soma (post-deploy)
+
+1. En Netlify dashboard → Project → Site configuration → Environment variables:
+   - `KIT_API_KEY_V4` = (copiar desde Supabase Dashboard → Edge Functions →
+     Secrets → `KIT_API_KEY_V4`, o desde donde la tengas)
+   - `CRON_SECRET` (opcional) = string aleatorio largo
+2. Tras deploy, verificar en Netlify → Functions → auto-publish:
+   - Que aparezca con "Scheduled · @hourly" en su panel.
+   - Que la primera ejecución (al cabo de máximo 1 hora) loguee `moved`, `updated`.
+3. Una vez verificado que va, **desactivar la edge function en Supabase**:
+   - Supabase Dashboard → Edge Functions → `auto-publish` → Pause/Delete.
+   - Crítico porque si no, AMBOS cron corren a la vez actualizando la misma BD.
+
+### Pendiente
+
+- Cuando lleguen métricas reales de clics tras el primer cron run de Kit v4
+  (que sí devuelve `total_clicks`), **quitar el flag `noTrackingYet`** de la
+  columna `clics` en `Analisis.jsx`. Eso restaurará el `0` en blanco normal
+  cuando sea 0 real.
+- Las 4 funciones RPC manuales que quedan (instagram-sync, zernio-sync,
+  instagram-auth, instagram-auth-callback) se quedan como deuda técnica
+  hasta que Soma necesite esa capacidad concretamente.
+- Cutover completo de Supabase (Fase 6): apagar el proyecto Supabase entero
+  cuando lleve unos días sin tráfico.
+
+---
+
 ## Fase 4 · Drag & drop en el Tablero · v0.47.0-α (2026-05-17)
 
 **Hito**: El Tablero pasa de visual a operativo — ahora puedes mover piezas
