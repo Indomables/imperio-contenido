@@ -81,12 +81,6 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
   return (
     <div className="cm-overlay" onClick={onClose}>
       <div className="cm-panel np-panel" onClick={(e) => e.stopPropagation()}>
-        <span className="br-tr"></span>
-        <span className="br-bl"></span>
-        <span className="screw tl"></span>
-        <span className="screw tr"></span>
-        <span className="screw bl"></span>
-        <span className="screw br"></span>
 
         <header className="cm-head">
           <div className="cm-head-l">
@@ -143,7 +137,7 @@ function initialDraft(kind, data) {
     columna:           data.columna,
     plataformas:       data.plataformas || [],
     contenido:         data.contenido || {},
-    fecha_publicacion: data.fecha_publicacion || "",
+    fecha_publicacion: data.fecha_publicacion || null,
     url_publicacion:   data.url_publicacion || "",
     notas:             data.notas || "",
     tematica:          data.tematica || "",
@@ -305,6 +299,7 @@ function PiezaFields({ draft, setField, setContenidoField, tituloRef }) {
           <input
             type="datetime-local"
             className="np-input"
+            step="300"
             value={draft.fecha_publicacion ? new Date(draft.fecha_publicacion).toISOString().slice(0, 16) : ""}
             onChange={(e) => setField("fecha_publicacion", e.target.value ? new Date(e.target.value).toISOString() : null)}
           />

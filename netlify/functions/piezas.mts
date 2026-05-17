@@ -93,7 +93,9 @@ export default async (req: Request, _context: Context) => {
 
       const ideaId = body.idea_id ?? body.ideaId ?? null;
       const contenido = body.contenido ?? {};
-      const fechaPublicacion = body.fecha_publicacion ?? null;
+      // "" → null para fecha_publicacion (evita ERROR cast a TIMESTAMP)
+      const rawFecha = body.fecha_publicacion ?? null;
+      const fechaPublicacion = rawFecha === "" ? null : rawFecha;
       const plataformas = body.plataformas ?? [];
       const urlPublicacion = body.url_publicacion ?? "";
       const notas = body.notas ?? "";
@@ -138,10 +140,13 @@ export default async (req: Request, _context: Context) => {
         body.columna !== undefined ? body.columna : existing.columna;
       const contenido =
         body.contenido !== undefined ? body.contenido : existing.contenido;
-      const fechaPublicacion =
+      // fecha_publicacion: si viene como "" (string vacía) la tratamos como null
+      // para que no falle el cast TIMESTAMP en PostgreSQL.
+      const rawFecha =
         body.fecha_publicacion !== undefined
           ? body.fecha_publicacion
           : existing.fecha_publicacion;
+      const fechaPublicacion = rawFecha === "" ? null : rawFecha;
       const plataformas =
         body.plataformas !== undefined
           ? body.plataformas
@@ -158,10 +163,12 @@ export default async (req: Request, _context: Context) => {
       // Kit broadcast ID — se setea desde la UI cuando la pieza email se
       // agenda en Kit. Puede ser el ID "legacy" que ve Soma en la URL de Kit;
       // auto-publish.mts lo normalizará al ID real del broadcast en su próximo run.
-      const kitBroadcastId =
+      // "" → null para mantener convención de "no vinculado".
+      const rawKitId =
         body.kit_broadcast_id !== undefined
           ? body.kit_broadcast_id
           : existing.kit_broadcast_id;
+      const kitBroadcastId = rawKitId === "" ? null : rawKitId;
 
       const [row] = await db.sql`
         UPDATE piezas SET

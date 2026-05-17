@@ -301,6 +301,10 @@
   font-family: var(--sans); font-weight: 500;
   font-size: 14px; letter-spacing: -0.01em; line-height: 1.25;
   color: var(--ink);
+  /* Reservamos espacio en la esquina superior derecha para los iconos hover
+     (✎ + ✕ + opcional ⚡/📊) para que el título nunca se solape con ellos.
+     Pensado para 3 iconos en el caso más amplio (email agendado/publicado). */
+  padding-right: 84px;
 }
 .kcard .excerpt {
   font-family: var(--sans); font-size: 12px; color: var(--ink-3); line-height: 1.45;

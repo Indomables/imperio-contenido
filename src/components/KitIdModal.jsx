@@ -47,12 +47,6 @@ export default function KitIdModal({ pieza, onClose, onSave }) {
   return (
     <div className="cm-overlay" onClick={onClose}>
       <div className="cm-panel kit-panel" onClick={(e) => e.stopPropagation()}>
-        <span className="br-tr"></span>
-        <span className="br-bl"></span>
-        <span className="screw tl"></span>
-        <span className="screw tr"></span>
-        <span className="screw bl"></span>
-        <span className="screw br"></span>
 
         <header className="cm-head kit-head">
           <div className="cm-head-l">

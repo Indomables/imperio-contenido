@@ -98,12 +98,6 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
   return (
     <div className="cm-overlay" onClick={onClose}>
       <div className="cm-panel np-panel" onClick={(e) => e.stopPropagation()}>
-        <span className="br-tr"></span>
-        <span className="br-bl"></span>
-        <span className="screw tl"></span>
-        <span className="screw tr"></span>
-        <span className="screw bl"></span>
-        <span className="screw br"></span>
 
         <header className="cm-head">
           <div className="cm-head-l">
@@ -260,6 +254,7 @@ export default function NuevaPiezaModal({ ideaId = null, ideaTitle = null, onClo
               <input
                 type="datetime-local"
                 className="np-input"
+                step="300"
                 value={fechaPublicacion}
                 onChange={(e) => setFechaPublicacion(e.target.value)}
               />

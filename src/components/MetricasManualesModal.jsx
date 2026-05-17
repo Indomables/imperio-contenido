@@ -82,12 +82,6 @@ export default function MetricasManualesModal({ pieza, onClose }) {
   return (
     <div className="cm-overlay" onClick={onClose}>
       <div className="cm-panel" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
-        <span className="br-tr"></span>
-        <span className="br-bl"></span>
-        <span className="screw tl"></span>
-        <span className="screw tr"></span>
-        <span className="screw bl"></span>
-        <span className="screw br"></span>
 
         <header className="cm-head">
           <div className="cm-head-l">
