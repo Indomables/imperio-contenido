@@ -213,6 +213,18 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
+  // Logueamos el resumen para que aparezca en los logs de Netlify
+  // (Netlify no loguea el body de la Response automáticamente, solo
+  // lo que pase por console.log).
+  console.log(JSON.stringify({
+    moved: result.moved,
+    updated: result.updated,
+    normalized: result.normalized,
+    errors_count: result.errors.length,
+    errors: result.errors,
+    debug: result.debug,
+  }));
+
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },
   });

@@ -3,7 +3,7 @@ export default function Boot() {
     <div className="boot" id="boot">
       <div className="scan"></div>
       <div className="boot-inner">
-        <div className="lbl">IMPERIO CONTENIDO · v0.48.0-α</div>
+        <div className="lbl">IMPERIO CONTENIDO · v0.48.1-α</div>
         <div className="ttl">MOUNTING CONTENT VOLUME</div>
         <div className="ln">
           <span>· KERNEL HANDSHAKE</span>
