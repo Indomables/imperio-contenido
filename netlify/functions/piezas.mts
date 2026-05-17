@@ -155,6 +155,13 @@ export default async (req: Request, _context: Context) => {
         body.tematica !== undefined ? body.tematica : existing.tematica;
       const ideaId =
         body.idea_id !== undefined ? body.idea_id : existing.idea_id;
+      // Kit broadcast ID — se setea desde la UI cuando la pieza email se
+      // agenda en Kit. Puede ser el ID "legacy" que ve Soma en la URL de Kit;
+      // auto-publish.mts lo normalizará al ID real del broadcast en su próximo run.
+      const kitBroadcastId =
+        body.kit_broadcast_id !== undefined
+          ? body.kit_broadcast_id
+          : existing.kit_broadcast_id;
 
       const [row] = await db.sql`
         UPDATE piezas SET
@@ -168,6 +175,7 @@ export default async (req: Request, _context: Context) => {
           url_publicacion = ${urlPublicacion},
           notas = ${notas},
           tematica = ${tematica},
+          kit_broadcast_id = ${kitBroadcastId},
           updated_at = NOW()
         WHERE id = ${id}
         RETURNING *

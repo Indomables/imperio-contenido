@@ -460,3 +460,30 @@
 .cmdbar .cap-caret { width: 7px; height: 18px; background: var(--acc); box-shadow: var(--acc-glow); animation: blink 1s steps(1) infinite; flex: 0 0 auto; }
 @keyframes blink { 0%, 49% { opacity:1; } 50%, 100% { opacity:0; } }
 .cmdbar .send { background: var(--acc); color: oklch(0.12 0.02 200); border: 0; padding: 8px 16px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; cursor: pointer; font-weight: 600; box-shadow: var(--acc-glow); flex: 0 0 auto; }
+
+/* ─── Kit broadcast ID badge ─────────────────────────────────────
+ * Indicador en cards de email agendadas. Verde si está vinculado al
+ * broadcast (auto-publish lo podrá mover a "publicado"), warning si
+ * falta el ID. Click sobre la card abre el CardModal donde se edita.
+ * ──────────────────────────────────────────────────────────────── */
+.kit-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 3px 7px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border: 1px solid;
+  user-select: none;
+}
+.kit-link.linked {
+  color: var(--pos);
+  border-color: oklch(from var(--pos) l c h / 0.5);
+  background: oklch(from var(--pos) l c h / 0.08);
+}
+.kit-link.unlinked {
+  color: var(--warn);
+  border-color: oklch(from var(--warn) l c h / 0.5);
+  background: oklch(from var(--warn) l c h / 0.08);
+}
+.kit-link-icon { font-size: 10px; }

@@ -589,6 +589,23 @@ export default function Tablero() {
                           </div>
                         )}
 
+                        {/* Indicador Kit broadcast ID — solo para emails agendados.
+                            Si está vinculado → badge verde con el ID. Sin vincular → warning.
+                            Click abre el CardModal donde se edita. */}
+                        {p.formato === "email" && c.columna === "agendado" && (
+                          <div
+                            className={`kit-link ${p.kit_broadcast_id ? "linked" : "unlinked"}`}
+                            title={p.kit_broadcast_id
+                              ? `Vinculado al broadcast ${p.kit_broadcast_id}. Click para editar.`
+                              : "Falta el ID del broadcast de Kit. Click para añadirlo."}
+                          >
+                            <span className="kit-link-icon">{p.kit_broadcast_id ? "✓" : "⚠"}</span>
+                            <span className="kit-link-tx">
+                              {p.kit_broadcast_id ? `KIT · ${p.kit_broadcast_id}` : "VINCULAR KIT"}
+                            </span>
+                          </div>
+                        )}
+
                         {/* Publicado: fecha pasada sin icono (gris), sin hora */}
                         {showPast && p.fecha_publicacion && (
                           <div className="kdate past">

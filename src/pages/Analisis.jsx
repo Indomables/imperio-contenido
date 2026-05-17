@@ -282,9 +282,13 @@ export default function Analisis() {
   const periodoLabel = periodo === "all" ? "historial completo" : periodoConf.label.toLowerCase();
 
   // Contadores por formato (con periodo aplicado)
+  // SOLO cuenta piezas que estén en columna="publicado" Y con fecha pasada.
+  // (No basta con la fecha — una pieza puede tener fecha pasada y estar aún
+  //  en "agendado" si no se publicó realmente.)
   const counts = useMemo(() => {
     const c = { email: 0, reel: 0, relampago: 0, youtube: 0, grieta: 0 };
     for (const p of piezas) {
+      if (p.columna !== "publicado") continue;
       if (!isPublishedInPast(p.fecha_publicacion)) continue;
       if (!isInPeriod(p.fecha_publicacion, periodoConf?.days ?? null)) continue;
       if (c[p.formato] !== undefined) c[p.formato] += 1;
@@ -292,12 +296,13 @@ export default function Analisis() {
     return c;
   }, [piezas, periodoConf]);
 
-  // Filas crudas
+  // Filas crudas — mismas restricciones que counts
   const rows = useMemo(() => {
     const conf = FORMATO_CONFIG[formato];
     if (!conf) return [];
     return piezas
       .filter((p) => p.formato === formato)
+      .filter((p) => p.columna === "publicado")
       .filter((p) => isPublishedInPast(p.fecha_publicacion))
       .filter((p) => isInPeriod(p.fecha_publicacion, periodoConf?.days ?? null))
       .map((p) => ({ pieza: p, datos: metricasMap.get(p.id) || {} }));

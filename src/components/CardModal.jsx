@@ -51,6 +51,7 @@ export default function CardModal({ kind, data, onClose, onUpdate, onDelete }) {
         tematica: data.tematica || "",
         fecha_publicacion: data.fecha_publicacion || "",
         url_publicacion: data.url_publicacion || "",
+        kit_broadcast_id: data.kit_broadcast_id || "",
       });
     }
   }, [data, kind]);
@@ -288,6 +289,28 @@ function PiezaForm({ draft, editing, setField, setContenidoField }) {
           )}
         </Field>
       </div>
+
+      {/* Kit broadcast ID — solo para emails. Conecta la pieza con el
+          broadcast real de Kit para que auto-publish.mts pueda mover
+          la pieza a "publicado" automáticamente y refrescar métricas.
+          Acepta el ID "legacy" que ve Soma en Kit; auto-publish lo
+          normalizará al ID real en su próximo run horario. */}
+      {draft.formato === "email" && (
+        <Field label="Kit broadcast ID">
+          {editing ? (
+            <input
+              className="cm-input"
+              value={draft.kit_broadcast_id}
+              onChange={(e) => setField("kit_broadcast_id", e.target.value.trim())}
+              placeholder="ej. 24121294"
+            />
+          ) : (
+            <div className="cm-text">
+              {draft.kit_broadcast_id || <span className="cm-empty">— sin vincular —</span>}
+            </div>
+          )}
+        </Field>
+      )}
 
       <Field label="Temática">
         {editing ? (
