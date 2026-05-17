@@ -72,7 +72,7 @@
 .contenido-actions .iconbtn.sync:hover    { color: oklch(0.78 0.16 245); box-shadow: inset 0 -2px 0 oklch(0.78 0.16 245); background: oklch(0.78 0.16 245 / 0.08); }
 .contenido-actions .iconbtn.zap:hover     { color: oklch(0.82 0.18 75); box-shadow: inset 0 -2px 0 oklch(0.82 0.18 75); background: oklch(0.82 0.18 75 / 0.08); }
 .contenido-actions .iconbtn.settings:hover{ color: oklch(0.965 0.008 220); box-shadow: inset 0 -2px 0 oklch(0.965 0.008 220); background: oklch(0.965 0.008 220 / 0.05); }
-.contenido-actions .iconbtn.logout:hover  { color: oklch(0.72 0.205 30); box-shadow: inset 0 -2px 0 oklch(0.72 0.205 30); background: oklch(0.72 0.205 30 / 0.08); }
+.contenido-actions .iconbtn.logout:hover  { color: oklch(0.62 0.24 25); box-shadow: inset 0 -2px 0 oklch(0.62 0.24 25); background: oklch(0.62 0.24 25 / 0.08); }
 .contenido-actions .iconbtn .ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; }
 /* Tooltip */
 .contenido-actions .iconbtn::after {
@@ -225,9 +225,9 @@
 }
 /* Per-type hover */
 .kcard.t-youtube:hover {
-  border-color: oklch(0.72 0.205 30);
-  background: oklch(0.72 0.205 30 / 0.10);
-  box-shadow: inset 0 0 0 1px oklch(0.72 0.205 30 / 0.4), 0 0 18px oklch(0.72 0.205 30 / 0.25);
+  border-color: oklch(0.62 0.24 25);
+  background: oklch(0.62 0.24 25 / 0.10);
+  box-shadow: inset 0 0 0 1px oklch(0.62 0.24 25 / 0.4), 0 0 18px oklch(0.62 0.24 25 / 0.25);
 }
 .kcard.t-email:hover {
   border-color: oklch(0.82 0.18 75);
@@ -235,9 +235,9 @@
   box-shadow: inset 0 0 0 1px oklch(0.82 0.18 75 / 0.4), 0 0 18px oklch(0.82 0.18 75 / 0.25);
 }
 .kcard.t-reel:hover {
-  border-color: oklch(0.72 0.20 40);
-  background: oklch(0.72 0.20 40 / 0.12);
-  box-shadow: inset 0 0 0 1px oklch(0.72 0.20 40 / 0.5), 0 0 18px oklch(0.72 0.20 40 / 0.30);
+  border-color: oklch(0.75 0.18 55);
+  background: oklch(0.75 0.18 55 / 0.12);
+  box-shadow: inset 0 0 0 1px oklch(0.75 0.18 55 / 0.5), 0 0 18px oklch(0.75 0.18 55 / 0.30);
 }
 .kcard.t-instagram:hover {
   border-color: oklch(0.78 0.18 320);
@@ -274,10 +274,10 @@
 .kcard.no-piezas { opacity: 0.45; }
 .kcard.no-piezas:hover { opacity: 1; }
 .kcard.no-piezas::before { background: var(--ink-5); box-shadow: none; }
-.kcard.t-youtube::before  { background: oklch(0.72 0.205 30); box-shadow: 0 0 8px oklch(0.72 0.205 30 / 0.4); }
+.kcard.t-youtube::before  { background: oklch(0.62 0.24 25); box-shadow: 0 0 8px oklch(0.62 0.24 25 / 0.4); }
 .kcard.t-email::before    { background: var(--acc); box-shadow: var(--acc-glow); }
 .kcard.t-instagram::before{ background: oklch(0.78 0.18 320); box-shadow: 0 0 8px oklch(0.78 0.18 320 / 0.4); }
-.kcard.t-reel::before     { background: oklch(0.72 0.20 40); box-shadow: 0 0 8px oklch(0.72 0.20 40 / 0.5); }
+.kcard.t-reel::before     { background: oklch(0.75 0.18 55); box-shadow: 0 0 8px oklch(0.75 0.18 55 / 0.5); }
 .kcard.t-tiktok::before   { background: oklch(0.78 0.16 245); box-shadow: 0 0 8px oklch(0.78 0.16 245 / 0.4); }
 .kcard.t-twitter::before  { background: oklch(0.78 0.13 220); box-shadow: 0 0 8px oklch(0.78 0.13 220 / 0.4); }
 
@@ -288,10 +288,10 @@
   padding: 3px 7px; border: 1px solid; font-weight: 500;
   align-self: flex-start;
 }
-.kbadge.t-youtube   { color: oklch(0.72 0.205 30); border-color: oklch(0.72 0.205 30 / 0.5); background: oklch(0.72 0.205 30 / 0.08); }
+.kbadge.t-youtube   { color: oklch(0.62 0.24 25); border-color: oklch(0.62 0.24 25 / 0.5); background: oklch(0.62 0.24 25 / 0.08); }
 .kbadge.t-email     { color: var(--acc); border-color: oklch(from var(--acc) l c h / 0.5); background: var(--acc-bg2); }
 .kbadge.t-instagram { color: oklch(0.78 0.18 320); border-color: oklch(0.78 0.18 320 / 0.5); background: oklch(0.78 0.18 320 / 0.08); }
-.kbadge.t-reel      { color: oklch(0.75 0.20 40); border-color: oklch(0.75 0.20 40 / 0.6); background: oklch(0.75 0.20 40 / 0.10); }
+.kbadge.t-reel      { color: oklch(0.75 0.18 55); border-color: oklch(0.75 0.18 55 / 0.6); background: oklch(0.75 0.18 55 / 0.10); }
 .kbadge.t-tiktok    { color: oklch(0.78 0.16 245); border-color: oklch(0.78 0.16 245 / 0.5); background: oklch(0.78 0.16 245 / 0.08); }
 .kbadge.t-twitter   { color: oklch(0.78 0.13 220); border-color: oklch(0.78 0.13 220 / 0.5); background: oklch(0.78 0.13 220 / 0.08); }
 .kbadge.special     { color: oklch(0.78 0.18 245); border-color: oklch(0.78 0.18 245 / 0.5); background: oklch(0.78 0.18 245 / 0.08); }

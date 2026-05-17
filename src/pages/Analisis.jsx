@@ -51,7 +51,7 @@ const FORMATO_CONFIG = {
     columns: [
       { key: "enviados",      label: "Enviados",    source: "enviados",      type: "int" },
       { key: "aperturas",     label: "Aperturas",   source: "aperturas",     type: "int" },
-      { key: "tasa_apertura", label: "% Apertura",  source: "tasa_apertura", type: "pct", benchmark: BENCHMARKS.tasa_apertura },
+      { key: "tasa_apertura", label: "% Apertura",  source: "tasa_apertura", type: "pct", benchmark: BENCHMARKS.tasa_apertura, accent: "pos" },
       // Clics y % Clics: aún no hay tracking activo (Kit / Zernio).
       // noTrackingYet hace que el "0" salga en gris (val dash) en lugar de
       // en blanco — señaliza visualmente "no es 0 real, es ausencia de dato".
@@ -503,15 +503,16 @@ export default function Analisis() {
             <tr>
               <th className="idx">#</th>
               <th
-                className={`title-col sortable ${sort.key === "titulo" ? "sorted" : ""}`}
-                onClick={() => toggleSort("titulo")}
+                className={`title-col sortable ${sort.key === "fecha" ? "sorted" : ""}`}
+                onClick={() => toggleSort("fecha")}
+                title="Ordenar por fecha de publicación"
               >
-                Pieza {arrow("titulo")}
+                Pieza {arrow("fecha")}
               </th>
               {conf.columns.map((c) => (
                 <th
                   key={c.key}
-                  className={`sortable ${sort.key === c.key ? "sorted" : ""}`}
+                  className={`sortable ${sort.key === c.key ? "sorted" : ""}${c.accent ? ` th-${c.accent}` : ""}`}
                   onClick={() => toggleSort(c.key)}
                 >
                   {c.label} {arrow(c.key)}

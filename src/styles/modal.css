@@ -187,3 +187,98 @@
 }
 .cmdbar-tag:focus { border-color: var(--acc); }
 .cmdbar-tag:disabled { opacity: 0.5; }
+
+/* ─────────────────────────────────────────────────────────────
+ * NuevaIdeaModal · NuevaPiezaModal
+ * Inputs, grid de opciones, breadcrumbs
+ * ───────────────────────────────────────────────────────────── */
+
+/* Labels y campos genéricos */
+.np-label {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 18px;
+}
+.np-label-tx {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.np-input,
+.np-textarea {
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-family: var(--sans); font-size: 14px;
+  padding: 10px 12px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.np-input { font-size: 16px; }
+.np-textarea { resize: vertical; min-height: 80px; line-height: 1.55; }
+.np-input:focus,
+.np-textarea:focus { border-color: var(--acc); }
+
+/* Grid de opciones (formato, plataforma) */
+.np-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.np-option {
+  display: flex; flex-direction: column; gap: 6px;
+  text-align: left;
+  background: oklch(0.130 0.016 235);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  padding: 16px 18px;
+  font-family: var(--sans);
+  cursor: pointer; outline: none;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.np-option:hover {
+  border-color: var(--acc);
+  background: oklch(0.155 0.018 235);
+  transform: translateY(-1px);
+}
+.np-option:active { transform: translateY(0); }
+.np-option:focus-visible { border-color: var(--acc); box-shadow: var(--acc-glow); }
+.np-option-icon {
+  font-family: var(--mono); font-size: 18px; color: var(--ink-2);
+  letter-spacing: 0;
+}
+.np-option-label {
+  font-size: 16px; font-weight: 500; color: var(--ink);
+}
+.np-option-desc {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
+/* Tinte por formato — barra lateral izquierda */
+.np-option.t-email     { border-left: 3px solid var(--acc); }
+.np-option.t-relampago { border-left: 3px solid oklch(0.78 0.18 245); }
+.np-option.t-reel      { border-left: 3px solid oklch(0.75 0.18 55); }
+.np-option.t-youtube   { border-left: 3px solid oklch(0.62 0.24 25); }
+.np-option.t-grieta    { border-left: 3px solid oklch(0.70 0.18 350); }
+
+/* Breadcrumb / botón volver */
+.np-breadcrumb {
+  margin-bottom: 16px;
+}
+.np-back {
+  background: transparent; border: none;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-3);
+  cursor: pointer; padding: 4px 0;
+}
+.np-back:hover { color: var(--ink); }
+
+/* Hint debajo del título cuando se vincula a idea */
+.np-hint {
+  margin-top: 12px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.10em;
+  color: var(--ink-3);
+}
+.np-hint em {
+  font-style: normal; color: var(--ink-2);
+}

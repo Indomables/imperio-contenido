@@ -5,14 +5,17 @@
  *  · Carril 01 "Ideas" → tabla ideas, con filtros (Todas/Sin piezas/Con piezas).
  *    - Cards con .excerpt (3 líneas clamp del contenido) + footer pieza-count + cut-btn.
  *    - Variante .no-piezas con opacidad 0.45 + botón .kcta "✂ Dar forma".
+ *    - Botón "+" del header → abre NuevaIdeaModal.
  *  · Carril 02 "En desarrollo" → cards con .subnm (formato · plataforma).
- *  · Carril 03 "Listo" → empty state si vacío.
- *  · Carril 04 "Agendado" → kcol.active (textos blancos brillantes) + .kdate.future con icono.
+ *    - Botón "+" del header → abre NuevaPiezaModal (sin idea vinculada).
+ *  · Carril 03 "Listo" → empty state si vacío. Sin botón "+".
+ *  · Carril 04 "Agendado" → kcol.active + .kdate.future con icono.
+ *                          Orden: fecha_publicacion ASC (próximo arriba). Sin "+".
  *  · Carril 05 "Publicado" → kcol.publicado (gradient verde) + .kdate.past sin icono.
- *  · Add button (+) en cada header focusea el capture bar con tag pre-seleccionado.
+ *                            Orden: fecha_publicacion DESC (reciente arriba). Sin "+".
  *  · Click en card abre CardModal con detalle + edición.
- *
- * Pendiente (siguiente paso): drag & drop entre carriles.
+ *  · Click en "✂ Dar forma" de una idea abre NuevaPiezaModal con idea_id pre-vinculado.
+ *  · Drag & drop entre carriles 02-05.
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -22,6 +25,8 @@ import {
   capture as captureApi,
 } from "../lib/api";
 import CardModal from "../components/CardModal";
+import NuevaIdeaModal from "../components/NuevaIdeaModal";
+import NuevaPiezaModal from "../components/NuevaPiezaModal";
 import { usePageStatus } from "../lib/pageStatus.jsx";
 
 // Carriles de piezas — meta de cada columna del kanban.
@@ -119,6 +124,14 @@ export default function Tablero() {
   const [ideasFilter, setIdeasFilter] = useState("todas");
   const captureRef = useRef(null);
 
+  // Modales de creación:
+  //   newIdeaOpen      → "+" del carril 01 Ideas
+  //   newPiezaContext  → { ideaId, ideaTitle } si viene de "Dar forma" de una idea
+  //                    → {} si viene de "+" del carril 02 Desarrollo
+  //                    → null si el modal está cerrado
+  const [newIdeaOpen, setNewIdeaOpen] = useState(false);
+  const [newPiezaContext, setNewPiezaContext] = useState(null);
+
   const reload = useCallback(async () => {
     try {
       setLoading(true);
@@ -165,7 +178,28 @@ export default function Tablero() {
     return { todas: ideas.length, con, sin };
   }, [ideas, piezasByIdea]);
 
-  const piezasPorColumna = (col) => piezas.filter((p) => p.columna === col);
+  // Filtra piezas por columna y aplica orden cronológico cuando corresponde:
+  //  · agendado  → fecha_publicacion ASC (más próximo a publicar arriba)
+  //  · publicado → fecha_publicacion DESC (más reciente publicado arriba)
+  //  · resto     → orden por defecto (created_at DESC del backend)
+  const piezasPorColumna = (col) => {
+    const lista = piezas.filter((p) => p.columna === col);
+    if (col === "agendado") {
+      return [...lista].sort((a, b) => {
+        const ta = a.fecha_publicacion ? new Date(a.fecha_publicacion).getTime() : Infinity;
+        const tb = b.fecha_publicacion ? new Date(b.fecha_publicacion).getTime() : Infinity;
+        return ta - tb;
+      });
+    }
+    if (col === "publicado") {
+      return [...lista].sort((a, b) => {
+        const ta = a.fecha_publicacion ? new Date(a.fecha_publicacion).getTime() : 0;
+        const tb = b.fecha_publicacion ? new Date(b.fecha_publicacion).getTime() : 0;
+        return tb - ta;
+      });
+    }
+    return lista;
+  };
 
   // Contadores para la statusbar inferior (los reporta usePageStatus abajo).
   // PIEZAS = todas las no publicadas (igual que en Dashboard).
@@ -282,16 +316,34 @@ export default function Tablero() {
     setSelected(null);
   }
 
-  // Click en + de columna → focus al capture bar con el tag pre-seleccionado
+  // Click en + de columna → abre el modal correspondiente.
+  //   "ideas"      → NuevaIdeaModal
+  //   "desarrollo" → NuevaPiezaModal (sin idea_id, pieza huérfana)
+  //   otras col.   → no debería llamarse (no se renderiza el botón)
   function handleAddClick(colKey) {
-    // Mapeo columna → tag por defecto del capture
-    // 01 Ideas → idea | 02-05 → email (Soma puede cambiar el select luego)
-    const tag = colKey === "ideas" ? "idea" : "email";
-    setCaptureTag(tag);
-    if (captureRef.current) {
-      captureRef.current.focus();
-      captureRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (colKey === "ideas") {
+      setNewIdeaOpen(true);
+    } else if (colKey === "desarrollo") {
+      setNewPiezaContext({});
     }
+  }
+
+  // Click en "Dar forma" sobre una card de idea → NuevaPiezaModal con la idea pre-vinculada.
+  function handleDarFormaClick(idea, e) {
+    if (e) e.stopPropagation();
+    setNewPiezaContext({ ideaId: idea.id, ideaTitle: idea.titulo });
+  }
+
+  // Callbacks de creación que los modales invocan en onCreate.
+  // Tras crear, hacemos un reload para evitar inconsistencias.
+  async function handleCreateIdea(payload) {
+    const nueva = await ideasApi.create(payload);
+    setIdeas((arr) => [nueva, ...arr]);
+  }
+
+  async function handleCreatePieza(payload) {
+    const nueva = await piezasApi.create(payload);
+    setPiezas((arr) => [nueva, ...arr]);
   }
 
   // ─── Render ──────────────────────────────────────────────────
@@ -416,22 +468,14 @@ export default function Tablero() {
                         </span>
                         <button
                           className="cut-btn"
-                          title="Dar forma"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // Por ahora abre la idea — futuras versiones podrían
-                            // abrir directamente un dialog de "crear nueva pieza"
-                            setSelected({ kind: "idea", data: idea });
-                          }}
+                          title="Dar forma — crear nueva pieza a partir de esta idea"
+                          onClick={(e) => handleDarFormaClick(idea, e)}
                         >✂</button>
                       </div>
                     ) : (
                       <button
                         className="kcta"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelected({ kind: "idea", data: idea });
-                        }}
+                        onClick={(e) => handleDarFormaClick(idea, e)}
                       >✂ Dar forma</button>
                     )}
                   </article>
@@ -479,12 +523,14 @@ export default function Tablero() {
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <div className="count">{pcol.length}</div>
-                    <button
-                      className="add-btn"
-                      type="button"
-                      onClick={() => handleAddClick(c.columna)}
-                      title={`Añadir a ${c.nm.toLowerCase()}`}
-                    >+</button>
+                    {c.columna === "desarrollo" && (
+                      <button
+                        className="add-btn"
+                        type="button"
+                        onClick={() => handleAddClick(c.columna)}
+                        title={`Añadir a ${c.nm.toLowerCase()}`}
+                      >+</button>
+                    )}
                   </div>
                 </div>
                 <div className="sub">
@@ -566,6 +612,22 @@ export default function Tablero() {
           onClose={() => setSelected(null)}
           onUpdate={(patch) => handleUpdate(selected.kind, selected.data.id, patch)}
           onDelete={() => handleDelete(selected.kind, selected.data.id)}
+        />
+      )}
+
+      {newIdeaOpen && (
+        <NuevaIdeaModal
+          onClose={() => setNewIdeaOpen(false)}
+          onCreate={handleCreateIdea}
+        />
+      )}
+
+      {newPiezaContext !== null && (
+        <NuevaPiezaModal
+          ideaId={newPiezaContext.ideaId || null}
+          ideaTitle={newPiezaContext.ideaTitle || null}
+          onClose={() => setNewPiezaContext(null)}
+          onCreate={handleCreatePieza}
         />
       )}
     </>
