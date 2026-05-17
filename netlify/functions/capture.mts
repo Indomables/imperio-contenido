@@ -1,6 +1,6 @@
 import type { Context, Config } from "@netlify/functions";
 import { db } from "../lib/db.js";
-import { ideas, piezas, FORMATOS, type Formato } from "../lib/schema.js";
+import { FORMATOS, isFormato } from "../lib/schema.js";
 import {
   json,
   badRequest,
@@ -12,13 +12,12 @@ import {
  * Capture rápido desde el capture bar:
  *
  *   POST /api/capture
- *   body: { text: "...", tag: "idea" | "email" | "reel" | ... }
+ *   body: { text: "...", tag: "idea" | <formato> }
  *
- * Comportamiento:
- *   - tag === "idea"  → crea una idea con el texto como título
- *   - tag in [formatos] → crea una pieza con formato=tag en columna="desarrollo"
+ * - tag === "idea"      → crea idea con `text` como título
+ * - tag in <formatos>   → crea pieza con formato=tag en columna="desarrollo"
  *
- * Responde con { kind: "idea" | "pieza", record: { ... } }
+ * Responde { kind: "idea" | "pieza", record: {...} }
  */
 export default async (req: Request, _context: Context) => {
   if (req.method !== "POST") return methodNotAllowed(req.method);
@@ -31,23 +30,19 @@ export default async (req: Request, _context: Context) => {
     if (!text) return badRequest("text es requerido");
 
     if (tag === "idea") {
-      const rows = await db
-        .insert(ideas)
-        .values({ titulo: text })
-        .returning();
-      return json({ kind: "idea", record: rows[0] }, 201);
+      const [row] = await db.sql`
+        INSERT INTO ideas (titulo) VALUES (${text}) RETURNING *
+      `;
+      return json({ kind: "idea", record: row }, 201);
     }
 
-    if (FORMATOS.includes(tag as Formato)) {
-      const rows = await db
-        .insert(piezas)
-        .values({
-          titulo: text,
-          formato: tag,
-          columna: "desarrollo",
-        })
-        .returning();
-      return json({ kind: "pieza", record: rows[0] }, 201);
+    if (isFormato(tag)) {
+      const [row] = await db.sql`
+        INSERT INTO piezas (titulo, formato, columna)
+        VALUES (${text}, ${tag}, 'desarrollo')
+        RETURNING *
+      `;
+      return json({ kind: "pieza", record: row }, 201);
     }
 
     return badRequest(

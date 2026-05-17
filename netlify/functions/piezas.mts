@@ -1,7 +1,11 @@
 import type { Context, Config } from "@netlify/functions";
-import { eq, desc, and, type SQL } from "drizzle-orm";
 import { db } from "../lib/db.js";
-import { piezas, FORMATOS, COLUMNAS, type Formato, type Columna } from "../lib/schema.js";
+import {
+  FORMATOS,
+  COLUMNAS,
+  isFormato,
+  isColumna,
+} from "../lib/schema.js";
 import {
   json,
   noContent,
@@ -14,17 +18,16 @@ import {
 
 /**
  * CRUD de piezas:
- *   GET    /api/piezas                  → listar (con filtros ?columna=, ?formato=)
+ *   GET    /api/piezas                  → listar (filtros ?columna=, ?formato=)
  *   GET    /api/piezas/:id              → obtener una
  *   POST   /api/piezas                  → crear
  *   PATCH  /api/piezas/:id              → editar
- *   POST   /api/piezas/:id/move         → cambiar de carril { columna: "..." }
+ *   POST   /api/piezas/:id/move         → cambiar carril { columna }
  *   DELETE /api/piezas/:id              → borrar
  */
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);
   const segments = getPathSegments(req.url);
-  // segments = ["piezas"] | ["piezas", "<id>"] | ["piezas", "<id>", "move"]
   const id = segments[1];
   const action = segments[2];
 
@@ -33,51 +36,44 @@ export default async (req: Request, _context: Context) => {
     if (req.method === "POST" && action === "move") {
       if (!id) return badRequest("id requerido");
       const body = await req.json();
-      const columna = body.columna as Columna | undefined;
-      if (!columna || !COLUMNAS.includes(columna)) {
-        return badRequest(
-          `columna debe ser una de: ${COLUMNAS.join(", ")}`
-        );
+      if (!isColumna(body.columna)) {
+        return badRequest(`columna debe ser una de: ${COLUMNAS.join(", ")}`);
       }
-      const rows = await db
-        .update(piezas)
-        .set({ columna })
-        .where(eq(piezas.id, id))
-        .returning();
-      return rows.length ? json(rows[0]) : notFound();
+      const [row] = await db.sql`
+        UPDATE piezas
+        SET columna = ${body.columna}, updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING *
+      `;
+      return row ? json(row) : notFound();
     }
 
     // ── GET ─────────────────────────────────────────────
     if (req.method === "GET") {
       if (id) {
-        const rows = await db.select().from(piezas).where(eq(piezas.id, id));
+        const rows = await db.sql`SELECT * FROM piezas WHERE id = ${id}`;
         return rows.length ? json(rows[0]) : notFound();
       }
 
-      const filters: SQL[] = [];
       const columna = url.searchParams.get("columna");
       const formato = url.searchParams.get("formato");
-      if (columna) {
-        if (!COLUMNAS.includes(columna as Columna)) {
-          return badRequest(`columna inválida: ${columna}`);
-        }
-        filters.push(eq(piezas.columna, columna));
+
+      if (columna && !isColumna(columna)) {
+        return badRequest(`columna inválida: ${columna}`);
       }
-      if (formato) {
-        if (!FORMATOS.includes(formato as Formato)) {
-          return badRequest(`formato inválido: ${formato}`);
-        }
-        filters.push(eq(piezas.formato, formato));
+      if (formato && !isFormato(formato)) {
+        return badRequest(`formato inválido: ${formato}`);
       }
 
-      const rows = filters.length
-        ? await db
-            .select()
-            .from(piezas)
-            .where(and(...filters))
-            .orderBy(desc(piezas.updatedAt))
-        : await db.select().from(piezas).orderBy(desc(piezas.updatedAt));
-
+      // Filtros combinados — todos opcionales
+      const rows = await db.sql`
+        SELECT * FROM piezas
+        WHERE
+          (${columna ?? null}::text IS NULL OR columna = ${columna ?? null}::text)
+          AND
+          (${formato ?? null}::text IS NULL OR formato = ${formato ?? null}::text)
+        ORDER BY updated_at DESC
+      `;
       return json(rows);
     }
 
@@ -87,77 +83,99 @@ export default async (req: Request, _context: Context) => {
       if (!body.titulo || typeof body.titulo !== "string") {
         return badRequest("titulo es requerido");
       }
-      if (!body.formato || !FORMATOS.includes(body.formato)) {
+      if (!isFormato(body.formato)) {
         return badRequest(`formato debe ser uno de: ${FORMATOS.join(", ")}`);
       }
-      const columna: Columna = body.columna ?? "desarrollo";
-      if (!COLUMNAS.includes(columna)) {
+      const columna = body.columna ?? "desarrollo";
+      if (!isColumna(columna)) {
         return badRequest(`columna debe ser una de: ${COLUMNAS.join(", ")}`);
       }
 
-      const rows = await db
-        .insert(piezas)
-        .values({
-          ideaId: body.idea_id ?? body.ideaId ?? null,
-          titulo: body.titulo,
-          formato: body.formato,
-          columna,
-          contenido: body.contenido ?? {},
-          fechaPublicacion: body.fecha_publicacion
-            ? new Date(body.fecha_publicacion)
-            : null,
-          plataformas: body.plataformas ?? [],
-          urlPublicacion: body.url_publicacion ?? "",
-          notas: body.notas ?? "",
-          tematica: body.tematica ?? "",
-        })
-        .returning();
-      return json(rows[0], 201);
+      const ideaId = body.idea_id ?? body.ideaId ?? null;
+      const contenido = body.contenido ?? {};
+      const fechaPublicacion = body.fecha_publicacion ?? null;
+      const plataformas = body.plataformas ?? [];
+      const urlPublicacion = body.url_publicacion ?? "";
+      const notas = body.notas ?? "";
+      const tematica = body.tematica ?? "";
+
+      const [row] = await db.sql`
+        INSERT INTO piezas (
+          idea_id, titulo, formato, columna, contenido,
+          fecha_publicacion, plataformas, url_publicacion, notas, tematica
+        ) VALUES (
+          ${ideaId}, ${body.titulo}, ${body.formato}, ${columna},
+          ${JSON.stringify(contenido)}::jsonb,
+          ${fechaPublicacion}, ${plataformas}, ${urlPublicacion}, ${notas}, ${tematica}
+        )
+        RETURNING *
+      `;
+      return json(row, 201);
     }
 
     // ── PATCH ───────────────────────────────────────────
     if (req.method === "PATCH") {
       if (!id) return badRequest("id requerido");
       const body = await req.json();
-      const update: Record<string, unknown> = {};
 
-      if (body.titulo !== undefined) update.titulo = body.titulo;
-      if (body.formato !== undefined) {
-        if (!FORMATOS.includes(body.formato)) return badRequest("formato inválido");
-        update.formato = body.formato;
-      }
-      if (body.columna !== undefined) {
-        if (!COLUMNAS.includes(body.columna)) return badRequest("columna inválida");
-        update.columna = body.columna;
-      }
-      if (body.contenido !== undefined) update.contenido = body.contenido;
-      if (body.fecha_publicacion !== undefined) {
-        update.fechaPublicacion = body.fecha_publicacion
-          ? new Date(body.fecha_publicacion)
-          : null;
-      }
-      if (body.plataformas !== undefined) update.plataformas = body.plataformas;
-      if (body.url_publicacion !== undefined) update.urlPublicacion = body.url_publicacion;
-      if (body.notas !== undefined) update.notas = body.notas;
-      if (body.tematica !== undefined) update.tematica = body.tematica;
-      if (body.idea_id !== undefined) update.ideaId = body.idea_id;
+      const [existing] = await db.sql`SELECT * FROM piezas WHERE id = ${id}`;
+      if (!existing) return notFound();
 
-      if (Object.keys(update).length === 0) {
-        return badRequest("Sin campos para actualizar");
+      // Validaciones de campos que pueden venir
+      if (body.formato !== undefined && !isFormato(body.formato)) {
+        return badRequest("formato inválido");
+      }
+      if (body.columna !== undefined && !isColumna(body.columna)) {
+        return badRequest("columna inválida");
       }
 
-      const rows = await db
-        .update(piezas)
-        .set(update)
-        .where(eq(piezas.id, id))
-        .returning();
-      return rows.length ? json(rows[0]) : notFound();
+      // Merge: usa el valor nuevo si viene, si no el actual
+      const pick = <T>(key: string, fallback: T): T =>
+        body[key] !== undefined ? body[key] : fallback;
+
+      const titulo = pick("titulo", existing.titulo);
+      const formato = pick("formato", existing.formato);
+      const columna = pick("columna", existing.columna);
+      const contenido = pick("contenido", existing.contenido);
+      const fechaPublicacion =
+        body.fecha_publicacion !== undefined
+          ? body.fecha_publicacion
+          : existing.fecha_publicacion;
+      const plataformas = pick("plataformas", existing.plataformas);
+      const urlPublicacion =
+        body.url_publicacion !== undefined
+          ? body.url_publicacion
+          : existing.url_publicacion;
+      const notas = pick("notas", existing.notas);
+      const tematica = pick("tematica", existing.tematica);
+      const ideaId =
+        body.idea_id !== undefined ? body.idea_id : existing.idea_id;
+
+      const [row] = await db.sql`
+        UPDATE piezas SET
+          idea_id = ${ideaId},
+          titulo = ${titulo},
+          formato = ${formato},
+          columna = ${columna},
+          contenido = ${JSON.stringify(contenido)}::jsonb,
+          fecha_publicacion = ${fechaPublicacion},
+          plataformas = ${plataformas},
+          url_publicacion = ${urlPublicacion},
+          notas = ${notas},
+          tematica = ${tematica},
+          updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING *
+      `;
+      return json(row);
     }
 
     // ── DELETE ──────────────────────────────────────────
     if (req.method === "DELETE") {
       if (!id) return badRequest("id requerido");
-      const rows = await db.delete(piezas).where(eq(piezas.id, id)).returning();
+      const rows = await db.sql`
+        DELETE FROM piezas WHERE id = ${id} RETURNING id
+      `;
       return rows.length ? noContent() : notFound();
     }
 

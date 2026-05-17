@@ -1,11 +1,18 @@
 /**
- * Cliente Drizzle conectado a Netlify Database.
+ * Cliente de DB para todas las Functions.
  *
- * Las credenciales (NETLIFY_DATABASE_URL) las inyecta Netlify
- * automáticamente en runtime. No hay que configurar nada.
+ * Usa @netlify/database, el módulo oficial. La connection string
+ * la inyecta Netlify automáticamente en runtime — no hay nada
+ * que configurar ni env vars que setear manualmente.
+ *
+ * Uso:
+ *   import { db } from "../lib/db.js";
+ *   const rows = await db.sql`SELECT * FROM ideas WHERE id = ${id}`;
+ *
+ * db.sql es tagged template literal: los valores se parametrizan
+ * automáticamente, así que es seguro contra SQL injection.
  */
 
-import { drizzle } from "drizzle-orm/netlify-db";
-import * as schema from "./schema.js";
+import { getDatabase } from "@netlify/database";
 
-export const db = drizzle({ schema });
+export const db = getDatabase();

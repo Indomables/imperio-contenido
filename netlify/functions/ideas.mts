@@ -1,7 +1,5 @@
 import type { Context, Config } from "@netlify/functions";
-import { eq, desc } from "drizzle-orm";
 import { db } from "../lib/db.js";
-import { ideas } from "../lib/schema.js";
 import {
   json,
   noContent,
@@ -14,28 +12,26 @@ import {
 
 /**
  * CRUD de ideas:
- *   GET    /api/ideas         → listar todas (ordenadas por creación DESC)
+ *   GET    /api/ideas         → listar (más recientes primero)
  *   GET    /api/ideas/:id     → obtener una
- *   POST   /api/ideas         → crear (body: { titulo, notas?, notas_internas? })
- *   PATCH  /api/ideas/:id     → editar
+ *   POST   /api/ideas         → crear { titulo, notas?, notas_internas? }
+ *   PATCH  /api/ideas/:id     → editar (parcial)
  *   DELETE /api/ideas/:id     → borrar
  */
 export default async (req: Request, _context: Context) => {
   const segments = getPathSegments(req.url);
-  // segments = ["ideas"] o ["ideas", "<id>"]
   const id = segments[1];
 
   try {
     switch (req.method) {
       case "GET": {
         if (id) {
-          const rows = await db.select().from(ideas).where(eq(ideas.id, id));
+          const rows = await db.sql`SELECT * FROM ideas WHERE id = ${id}`;
           return rows.length ? json(rows[0]) : notFound();
         }
-        const rows = await db
-          .select()
-          .from(ideas)
-          .orderBy(desc(ideas.createdAt));
+        const rows = await db.sql`
+          SELECT * FROM ideas ORDER BY created_at DESC
+        `;
         return json(rows);
       }
 
@@ -44,41 +40,53 @@ export default async (req: Request, _context: Context) => {
         if (!body.titulo || typeof body.titulo !== "string") {
           return badRequest("titulo es requerido");
         }
-        const rows = await db
-          .insert(ideas)
-          .values({
-            titulo: body.titulo,
-            notas: body.notas ?? "",
-            notasInternas: body.notas_internas ?? body.notasInternas ?? "",
-          })
-          .returning();
-        return json(rows[0], 201);
+        const titulo = body.titulo;
+        const notas = body.notas ?? "";
+        const notasInternas = body.notas_internas ?? body.notasInternas ?? "";
+
+        const [row] = await db.sql`
+          INSERT INTO ideas (titulo, notas, notas_internas)
+          VALUES (${titulo}, ${notas}, ${notasInternas})
+          RETURNING *
+        `;
+        return json(row, 201);
       }
 
       case "PATCH": {
         if (!id) return badRequest("id requerido en la URL");
         const body = await req.json();
-        const update: Record<string, unknown> = {};
-        if (body.titulo !== undefined) update.titulo = body.titulo;
-        if (body.notas !== undefined) update.notas = body.notas;
-        if (body.notas_internas !== undefined) update.notasInternas = body.notas_internas;
-        if (body.notasInternas !== undefined) update.notasInternas = body.notasInternas;
 
-        if (Object.keys(update).length === 0) {
-          return badRequest("Sin campos para actualizar");
-        }
+        const [existing] = await db.sql`
+          SELECT * FROM ideas WHERE id = ${id}
+        `;
+        if (!existing) return notFound();
 
-        const rows = await db
-          .update(ideas)
-          .set(update)
-          .where(eq(ideas.id, id))
-          .returning();
-        return rows.length ? json(rows[0]) : notFound();
+        const titulo = body.titulo !== undefined ? body.titulo : existing.titulo;
+        const notas = body.notas !== undefined ? body.notas : existing.notas;
+        const notasInternas =
+          body.notas_internas !== undefined
+            ? body.notas_internas
+            : body.notasInternas !== undefined
+              ? body.notasInternas
+              : existing.notas_internas;
+
+        const [row] = await db.sql`
+          UPDATE ideas
+          SET titulo = ${titulo},
+              notas = ${notas},
+              notas_internas = ${notasInternas},
+              updated_at = NOW()
+          WHERE id = ${id}
+          RETURNING *
+        `;
+        return json(row);
       }
 
       case "DELETE": {
         if (!id) return badRequest("id requerido en la URL");
-        const rows = await db.delete(ideas).where(eq(ideas.id, id)).returning();
+        const rows = await db.sql`
+          DELETE FROM ideas WHERE id = ${id} RETURNING id
+        `;
         return rows.length ? noContent() : notFound();
       }
 
