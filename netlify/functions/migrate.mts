@@ -27,19 +27,33 @@
  *      que sea idempotente).
  *   2. Sube a GitHub. Netlify deploya.
  *   3. Abre /api/migrate en el navegador. Listo.
+ *
+ * Implementación: usa `Pool` de @neondatabase/serverless (dep transitiva
+ * de @netlify/database) para ejecutar el SQL completo de cada migración
+ * dentro de una transacción real con rollback automático en fallo.
  */
 
 import type { Context, Config } from "@netlify/functions";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Pool } from "@neondatabase/serverless";
 import { db } from "../lib/db.js";
 
 const MIGRATIONS_DIR = join(process.cwd(), "netlify/database/migrations");
 
 // Migraciones que YA existían antes de instalar este sistema.
-// La primera llamada con ?modo=marcar-existentes las registra como aplicadas
-// sin ejecutar SQL (porque sus tablas ya están creadas en la BD real).
 const PRE_EXISTENTES = ["0000_baseline", "0001_seed_data_supabase"];
+
+// Netlify Database inyecta automáticamente la connection string en runtime.
+// Probamos los nombres de env var conocidos por orden de preferencia.
+function getConnectionString(): string | null {
+  return (
+    process.env.NETLIFY_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    process.env.NEON_DATABASE_URL ||
+    null
+  );
+}
 
 
 function json(payload: unknown, status = 200): Response {
@@ -49,88 +63,23 @@ function json(payload: unknown, status = 200): Response {
   });
 }
 
-/**
- * Divide un script SQL en statements individuales.
- *
- * Respeta:
- *   - Comentarios de línea  (-- ...)
- *   - Comentarios de bloque (slash-asterisk ... asterisk-slash)
- *   - Bloques dollar-quoted ($$ ... $$) usados en funciones plpgsql
- *
- * El `;` solo cuenta como separador cuando NO estamos dentro de un
- * comentario ni de un bloque $$.
- */
-function splitSqlStatements(sql: string): string[] {
-  const statements: string[] = [];
-  let current = "";
-  let inDollar = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  let i = 0;
-
-  while (i < sql.length) {
-    const c = sql[i];
-    const n = sql[i + 1];
-
-    if (inLineComment) {
-      current += c;
-      if (c === "\n") inLineComment = false;
-      i++;
-      continue;
-    }
-
-    if (inBlockComment) {
-      current += c;
-      if (c === "*" && n === "/") {
-        current += "/";
-        inBlockComment = false;
-        i += 2;
-        continue;
-      }
-      i++;
-      continue;
-    }
-
-    if (c === "-" && n === "-") {
-      inLineComment = true;
-      current += "--";
-      i += 2;
-      continue;
-    }
-
-    if (c === "/" && n === "*") {
-      inBlockComment = true;
-      current += "/*";
-      i += 2;
-      continue;
-    }
-
-    if (c === "$" && n === "$") {
-      current += "$$";
-      inDollar = !inDollar;
-      i += 2;
-      continue;
-    }
-
-    if (c === ";" && !inDollar) {
-      const trimmed = current.trim();
-      if (trimmed) statements.push(trimmed);
-      current = "";
-      i++;
-      continue;
-    }
-
-    current += c;
-    i++;
-  }
-
-  const trimmed = current.trim();
-  if (trimmed) statements.push(trimmed);
-  return statements;
-}
-
 
 export default async (req: Request, _ctx: Context) => {
+  const connectionString = getConnectionString();
+  if (!connectionString) {
+    return json(
+      {
+        error: "sin_connection_string",
+        mensaje:
+          "No se encontró ninguna de estas env vars: NETLIFY_DATABASE_URL, DATABASE_URL, NEON_DATABASE_URL",
+        env_vars_relacionadas: Object.keys(process.env).filter((k) =>
+          /DATABASE|NEON|POSTGRES|PG/.test(k),
+        ),
+      },
+      500,
+    );
+  }
+
   try {
     // 1. Asegurar la tabla de control. Idempotente.
     await db.sql`
@@ -199,7 +148,7 @@ export default async (req: Request, _ctx: Context) => {
       ya_aplicadas: string[];
       recien_aplicadas: string[];
       saltadas: { nombre: string; razon: string }[];
-      errores: { nombre: string; statement_preview: string; error: string }[];
+      errores: { nombre: string; error: string }[];
     } = {
       ya_aplicadas: [],
       recien_aplicadas: [],
@@ -207,52 +156,62 @@ export default async (req: Request, _ctx: Context) => {
       errores: [],
     };
 
-    for (const folder of folders) {
-      if (aplicadas.has(folder)) {
-        resultado.ya_aplicadas.push(folder);
-        continue;
-      }
+    // Pool nuevo por invocación. Las functions serverless son short-lived,
+    // así que crear y cerrar el pool por request es lo correcto.
+    const pool = new Pool({ connectionString });
 
-      const sqlPath = join(MIGRATIONS_DIR, folder, "migration.sql");
+    try {
+      for (const folder of folders) {
+        if (aplicadas.has(folder)) {
+          resultado.ya_aplicadas.push(folder);
+          continue;
+        }
 
-      let sqlText: string;
-      try {
-        sqlText = await readFile(sqlPath, "utf8");
-      } catch (err) {
-        resultado.saltadas.push({
-          nombre: folder,
-          razon:
-            "No se pudo leer migration.sql: " +
-            (err instanceof Error ? err.message : String(err)),
-        });
-        continue;
-      }
+        const sqlPath = join(MIGRATIONS_DIR, folder, "migration.sql");
 
-      const statements = splitSqlStatements(sqlText);
-      let fallo = false;
-
-      for (const stmt of statements) {
+        let sqlText: string;
         try {
-          await db.sql.query(stmt);
+          sqlText = await readFile(sqlPath, "utf8");
         } catch (err) {
+          resultado.saltadas.push({
+            nombre: folder,
+            razon:
+              "No se pudo leer migration.sql: " +
+              (err instanceof Error ? err.message : String(err)),
+          });
+          continue;
+        }
+
+        // Ejecutar la migración entera en una transacción.
+        // Pool.query() del cliente WebSocket de neon soporta multi-statement
+        // SQL nativamente, incluidos bloques $$ ... $$ y funciones plpgsql.
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(sqlText);
+          await client.query(
+            "INSERT INTO _migrations (nombre) VALUES ($1) ON CONFLICT (nombre) DO NOTHING",
+            [folder],
+          );
+          await client.query("COMMIT");
+          resultado.recien_aplicadas.push(folder);
+        } catch (err) {
+          try {
+            await client.query("ROLLBACK");
+          } catch {
+            // Si el ROLLBACK falla, seguimos. El error principal es el de
+            // la migración, no el del rollback.
+          }
           resultado.errores.push({
             nombre: folder,
-            statement_preview: stmt.slice(0, 240),
             error: err instanceof Error ? err.message : String(err),
           });
-          fallo = true;
-          break;
+        } finally {
+          client.release();
         }
       }
-
-      if (!fallo) {
-        await db.sql`
-          INSERT INTO _migrations (nombre)
-          VALUES (${folder})
-          ON CONFLICT (nombre) DO NOTHING
-        `;
-        resultado.recien_aplicadas.push(folder);
-      }
+    } finally {
+      await pool.end();
     }
 
     const status = resultado.errores.length > 0 ? 500 : 200;
