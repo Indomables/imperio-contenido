@@ -10,6 +10,9 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  # Incluye los archivos .sql de migraciones en el bundle de las functions.
+  # Necesario para que /api/migrate pueda leer migration.sql en runtime.
+  included_files = ["netlify/database/migrations/**/*.sql"]
 
 # Rewrites para que el frontend (SPA) maneje el routing
 [[redirects]]
