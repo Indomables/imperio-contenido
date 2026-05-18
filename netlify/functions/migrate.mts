@@ -12,17 +12,25 @@
  *      sin ejecutar nada. Solo se usa una vez tras instalar el sistema.
  *
  *   ?modo=diag
- *      Devuelve info de diagnóstico: env vars (solo nombres), tipos de la
- *      API de db.sql disponibles, listado de migraciones detectadas.
+ *      Devuelve info de diagnóstico: env keys, API disponible en db.sql,
+ *      carpetas detectadas. Útil para depurar problemas de conexión o paths.
  *
  *   (sin modo)
  *      Aplica las migraciones pendientes que encuentre.
  *
+ * Cómo añadir una migración futura:
+ *   1. Crea `netlify/database/migrations/00NN_descripcion/migration.sql`
+ *      con SQL idempotente (CREATE TABLE IF NOT EXISTS, etc.).
+ *   2. Sube a GitHub. Netlify deploya.
+ *   3. Abre /api/migrate en el navegador.
+ *
  * Auth: protegida por el site password de Netlify.
  *
- * Implementación: usa `db.sql` (que es el cliente neon de @netlify/database)
- * con tagged template ARTIFICIAL para ejecutar SQL crudo dinámico. Esto
- * evita necesitar un Pool separado con connection string explícita.
+ * Implementación: usa `db.sql.unsafe(stmt)` del cliente neon HTTP que
+ * @netlify/database expone. Es la API oficial para SQL crudo dinámico.
+ * Cada migración se divide en statements (respetando comentarios y
+ * bloques $$ ... $$) y se ejecuta uno a uno; si alguno falla, esa
+ * migración se reporta como error y NO se marca como aplicada.
  */
 
 import type { Context, Config } from "@netlify/functions";
@@ -32,6 +40,7 @@ import { db } from "../lib/db.js";
 
 const MIGRATIONS_DIR = join(process.cwd(), "netlify/database/migrations");
 
+// Migraciones que YA existían antes de instalar este sistema.
 const PRE_EXISTENTES = ["0000_baseline", "0001_seed_data_supabase"];
 
 
@@ -44,55 +53,15 @@ function json(payload: unknown, status = 200): Response {
 
 
 /**
- * Ejecuta una sentencia SQL cruda usando db.sql.
- *
- * `db.sql` es una tagged template function: en JS, al hacer
- *   sql`SELECT * FROM foo`
- * el motor JS llama internamente a:
- *   sql(["SELECT * FROM foo"], ...[])
- * donde el primer argumento es un array con propiedad `raw`.
- *
- * Reconstruimos ese array manualmente para pasar SQL dinámico.
- *
- * Si esa vía falla, intenta llamar a sql.query() y luego a sql() como
- * función directa, por compatibilidad con distintas versiones del cliente.
- */
-async function execRawSQL(stmt: string): Promise<void> {
-  const sql: any = db.sql;
-
-  // Método 1: tagged template artificial. Es la vía que respeta exactamente
-  // cómo se construye internamente una llamada `sql`tag`.
-  try {
-    const strings = Object.assign([stmt], { raw: [stmt] });
-    await sql(strings);
-    return;
-  } catch (err1) {
-    // Método 2: sql.query(stmt) por si el cliente lo expone.
-    if (typeof sql.query === "function") {
-      try {
-        await sql.query(stmt);
-        return;
-      } catch {
-        // continuar al siguiente
-      }
-    }
-    // Método 3: llamada directa con string. Última opción.
-    try {
-      await sql(stmt);
-      return;
-    } catch {
-      // ninguna vía funcionó; relanzamos el primer error que suele ser
-      // el más informativo
-      throw err1;
-    }
-  }
-}
-
-
-/**
  * Divide un script SQL en statements individuales.
- * Respeta comentarios de línea (--), de bloque (slash-asterisk),
- * y bloques dollar-quoted ($$ ... $$).
+ *
+ * Respeta:
+ *   - Comentarios de línea  (-- ...)
+ *   - Comentarios de bloque (slash-asterisk ... asterisk-slash)
+ *   - Bloques dollar-quoted ($$ ... $$) usados en funciones plpgsql
+ *
+ * El `;` solo cuenta como separador cuando NO estamos dentro de un
+ * comentario ni de un bloque $$.
  */
 function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
@@ -274,6 +243,8 @@ export default async (req: Request, _ctx: Context) => {
       errores: [],
     };
 
+    const sqlAny: any = db.sql;
+
     for (const folder of folders) {
       if (aplicadas.has(folder)) {
         resultado.ya_aplicadas.push(folder);
@@ -300,7 +271,7 @@ export default async (req: Request, _ctx: Context) => {
 
       for (const stmt of statements) {
         try {
-          await execRawSQL(stmt);
+          await sqlAny.unsafe(stmt);
         } catch (err) {
           resultado.errores.push({
             nombre: folder,
