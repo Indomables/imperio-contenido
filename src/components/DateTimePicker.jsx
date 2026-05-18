@@ -10,8 +10,10 @@
  *   · Mes en mayúsculas largo (MAYO 2026), días abreviados en footer (LUN)
  *   · Hora 24h, minutos solo cada 5 (00, 05, 10, ..., 55)
  *   · Botones Limpiar / Hoy / Confirmar
- *   · Auto-scroll a la hora y minuto seleccionados al abrir
+ *   · Auto-scroll a la hora y minuto seleccionados al abrir y tras "Hoy"
  *   · Esc o × cancela sin aplicar cambios
+ *   · Teclado: flechas para navegar días, Enter confirma,
+ *     PageUp/PageDown cambia mes, Home salta a hoy
  *
  * Props:
  *   open      — boolean, si está abierto
@@ -40,6 +42,11 @@ function snapMinutesTo5(min) {
   return Math.round(min / 5) * 5;
 }
 
+// Días en un mes dado (m: 0-11)
+function daysInMonth(y, m) {
+  return new Date(y, m + 1, 0).getDate();
+}
+
 // Construye state inicial a partir de `value` (Date | null | string).
 function buildInitialState(value) {
   const t = new Date();
@@ -47,11 +54,22 @@ function buildInitialState(value) {
     let mi = snapMinutesTo5(t.getMinutes());
     let h  = t.getHours();
     if (mi >= 60) { mi = 0; h = (h + 1) % 24; }
-    return { y: t.getFullYear(), m: t.getMonth(), d: null, h, mi, viewY: t.getFullYear(), viewM: t.getMonth() };
+    return {
+      y: t.getFullYear(), m: t.getMonth(), d: null, h, mi,
+      viewY: t.getFullYear(), viewM: t.getMonth(),
+      centerTrigger: 0,
+    };
   }
   const d = value instanceof Date ? value : new Date(value);
   if (isNaN(d.getTime())) {
-    return { y: t.getFullYear(), m: t.getMonth(), d: null, h: t.getHours(), mi: snapMinutesTo5(t.getMinutes()) % 60, viewY: t.getFullYear(), viewM: t.getMonth() };
+    let mi = snapMinutesTo5(t.getMinutes());
+    let h  = t.getHours();
+    if (mi >= 60) { mi = 0; h = (h + 1) % 24; }
+    return {
+      y: t.getFullYear(), m: t.getMonth(), d: null, h, mi,
+      viewY: t.getFullYear(), viewM: t.getMonth(),
+      centerTrigger: 0,
+    };
   }
   let mi = snapMinutesTo5(d.getMinutes());
   let h  = d.getHours();
@@ -64,6 +82,7 @@ function buildInitialState(value) {
     mi,
     viewY: d.getFullYear(),
     viewM: d.getMonth(),
+    centerTrigger: 0,
   };
 }
 
@@ -71,6 +90,7 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
   const [state, setState] = useState(() => buildInitialState(value));
   const hListRef = useRef(null);
   const mListRef = useRef(null);
+  const dpickRef = useRef(null);
 
   // Resetear estado cada vez que se abra (o cambie el valor inicial)
   useEffect(() => {
@@ -78,15 +98,9 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // ESC cancela
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === "Escape") onCancel?.(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
-
-  // Auto-scroll a la hora y minuto seleccionados cuando se abre
+  // Auto-scroll a la hora y minuto seleccionados.
+  // Depende de: open + h + mi + centerTrigger (este último permite forzar
+  // re-centrado desde "Hoy" aunque h/mi no cambien).
   useEffect(() => {
     if (!open) return;
     const tid = setTimeout(() => {
@@ -97,7 +111,7 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
       });
     }, 30);
     return () => clearTimeout(tid);
-  }, [open, state.h, state.mi]);
+  }, [open, state.h, state.mi, state.centerTrigger]);
 
   // ── Render del calendario ──
   const calendarDays = useMemo(() => {
@@ -105,21 +119,24 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
     const firstOfMonth = new Date(state.viewY, state.viewM, 1);
     let dow = firstOfMonth.getDay();
     dow = dow === 0 ? 6 : dow - 1; // Monday-first
-    const daysInMonth = new Date(state.viewY, state.viewM + 1, 0).getDate();
-    const daysPrev    = new Date(state.viewY, state.viewM, 0).getDate();
+    const dim   = daysInMonth(state.viewY, state.viewM);
+    const dimP  = daysInMonth(state.viewY, state.viewM - 1);
     const today = new Date();
 
     for (let i = 0; i < 42; i++) {
       let dayNum, monthOffset;
       if (i < dow) {
-        dayNum = daysPrev - (dow - i - 1); monthOffset = -1;
-      } else if (i - dow + 1 > daysInMonth) {
-        dayNum = i - dow + 1 - daysInMonth; monthOffset = +1;
+        dayNum = dimP - (dow - i - 1); monthOffset = -1;
+      } else if (i - dow + 1 > dim) {
+        dayNum = i - dow + 1 - dim; monthOffset = +1;
       } else {
         dayNum = i - dow + 1; monthOffset = 0;
       }
-      const cellY = state.viewY + (monthOffset === -1 && state.viewM === 0 ? -1 : 0);
-      const cellM = (state.viewM + monthOffset + 12) % 12;
+      // Año/mes reales de la celda (cruza año si hace falta)
+      let cellY = state.viewY;
+      let cellM = state.viewM + monthOffset;
+      if (cellM < 0)  { cellM = 11; cellY -= 1; }
+      if (cellM > 11) { cellM = 0;  cellY += 1; }
       const cellDate = new Date(cellY, cellM, dayNum);
       const isToday = cellDate.getFullYear() === today.getFullYear() &&
                       cellDate.getMonth()    === today.getMonth() &&
@@ -146,8 +163,6 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
     const wd = WDAY_SHORT[d.getDay()];
     return `${wd} · ${pad(state.d)} ${MONTHS_SHORT[state.m]} ${state.y} · ${pad(state.h)}:${pad(state.mi)}`;
   }, [state.y, state.m, state.d, state.h, state.mi]);
-
-  if (!open) return null;
 
   // ── Handlers ──
   function handleDayClick(dayNum, monthOffset) {
@@ -178,11 +193,15 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
     let mi = snapMinutesTo5(t.getMinutes());
     let h  = t.getHours();
     if (mi >= 60) { mi = 0; h = (h + 1) % 24; }
-    setState({
+    setState((s) => ({
       y: t.getFullYear(), m: t.getMonth(), d: t.getDate(),
       h, mi,
       viewY: t.getFullYear(), viewM: t.getMonth(),
-    });
+      // Bump del trigger para forzar re-centrado aunque h/mi coincidan
+      // con los actuales (caso del usuario que pulsa "Hoy" cuando ya
+      // estaba en una hora cercana — el calendario debe re-scrollar).
+      centerTrigger: s.centerTrigger + 1,
+    }));
   }
   function handleClear() {
     setState((s) => ({ ...s, d: null }));
@@ -196,11 +215,77 @@ export default function DateTimePicker({ open, value, onConfirm, onCancel }) {
     onConfirm?.(result);
   }
 
+  // ── Soporte de teclado ──
+  // Esc cancela. Enter confirma. Flechas mueven el día seleccionado
+  // (con auto-cambio de mes si te sales). PageUp/PageDown cambian mes.
+  // Home salta a hoy. No interceptamos teclas cuando el foco está dentro
+  // de las listas de hora/min (para no romper su scroll).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); onCancel?.(); return; }
+      if (e.key === "Enter")  { e.preventDefault(); handleConfirm(); return; }
+
+      // No interferir con scroll/foco interno de las listas
+      const insideList = dpickRef.current && dpickRef.current.contains(document.activeElement) &&
+                         document.activeElement.closest && document.activeElement.closest(".dp-list");
+      if (insideList && (e.key === "ArrowUp" || e.key === "ArrowDown")) return;
+
+      if (e.key === "PageUp")   { e.preventDefault(); prevMonth();   return; }
+      if (e.key === "PageDown") { e.preventDefault(); nextMonth();   return; }
+      if (e.key === "Home")     { e.preventDefault(); handleToday(); return; }
+
+      // Flechas: mover día seleccionado (±1 / ±7 días)
+      const delta =
+        e.key === "ArrowLeft"  ? -1 :
+        e.key === "ArrowRight" ?  1 :
+        e.key === "ArrowUp"    ? -7 :
+        e.key === "ArrowDown"  ?  7 : 0;
+      if (delta !== 0) {
+        e.preventDefault();
+        setState((s) => {
+          // Si no hay día seleccionado, arrancamos desde el 1 del mes en vista
+          const base = s.d !== null
+            ? new Date(s.y, s.m, s.d)
+            : new Date(s.viewY, s.viewM, 1);
+          base.setDate(base.getDate() + delta);
+          return {
+            ...s,
+            y: base.getFullYear(), m: base.getMonth(), d: base.getDate(),
+            viewY: base.getFullYear(), viewM: base.getMonth(),
+          };
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, state.d, state.y, state.m, state.viewY, state.viewM, state.h, state.mi]);
+
+  if (!open) return null;
+
   return (
     <div className="dp-host" onClick={onCancel}>
-      <div className="dp-scrim" aria-hidden="true"></div>
-      <div className="dpick" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="dpTitle">
 
+      {/* Faded board silhouette behind — siluetas de columnas del Tablero */}
+      <div className="dp-host-bg" aria-hidden="true">
+        <div className="g-col"></div>
+        <div className="g-col"></div>
+        <div className="g-col"></div>
+        <div className="g-col"></div>
+        <div className="g-col"></div>
+      </div>
+
+      <div className="dp-scrim" aria-hidden="true"></div>
+
+      <div
+        className="dpick"
+        ref={dpickRef}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-labelledby="dpTitle"
+        aria-modal="true"
+      >
         {/* Chasis */}
         <span className="s-br tl"></span><span className="s-br tr"></span>
         <span className="s-br bl"></span><span className="s-br br"></span>
