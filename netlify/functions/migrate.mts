@@ -5,32 +5,30 @@
  * lee las carpetas de `netlify/database/migrations/`, lleva la cuenta en
  * una tabla `_migrations`, y aplica solo las pendientes.
  *
- * MODOS (todos vía query param):
+ * MODOS (vía query param):
  *
  *   ?modo=marcar-existentes
  *      Registra 0000_baseline y 0001_seed_data_supabase como YA APLICADAS
  *      sin ejecutar nada. Solo se usa una vez tras instalar el sistema.
  *
  *   ?modo=diag
- *      Devuelve info de diagnóstico: env keys, API disponible en db.sql,
- *      carpetas detectadas. Útil para depurar problemas de conexión o paths.
+ *      Devuelve env keys (solo nombres), API disponible en db.sql, y
+ *      las carpetas detectadas. Útil para depurar.
  *
  *   (sin modo)
- *      Aplica las migraciones pendientes que encuentre.
- *
- * Cómo añadir una migración futura:
- *   1. Crea `netlify/database/migrations/00NN_descripcion/migration.sql`
- *      con SQL idempotente (CREATE TABLE IF NOT EXISTS, etc.).
- *   2. Sube a GitHub. Netlify deploya.
- *   3. Abre /api/migrate en el navegador.
+ *      Aplica las migraciones pendientes.
  *
  * Auth: protegida por el site password de Netlify.
  *
- * Implementación: usa `db.sql.unsafe(stmt)` del cliente neon HTTP que
- * @netlify/database expone. Es la API oficial para SQL crudo dinámico.
- * Cada migración se divide en statements (respetando comentarios y
- * bloques $$ ... $$) y se ejecuta uno a uno; si alguno falla, esa
- * migración se reporta como error y NO se marca como aplicada.
+ * Estrategia de ejecución (en este orden):
+ *   1) Intenta `db.sql.unsafe(sqlEntero)` en una sola llamada. El cliente
+ *      neon HTTP suele soportar multi-statement aquí.
+ *   2) Si falla, divide el SQL en statements (respetando comentarios,
+ *      bloques $$ ... $$ y strings entre comillas simples con escape '')
+ *      y los ejecuta uno a uno con `db.sql.unsafe(stmt)`.
+ *
+ * La migración solo se marca como aplicada cuando todos los statements
+ * pasan OK. Si algo falla, queda como pendiente y se reporta en el JSON.
  */
 
 import type { Context, Config } from "@netlify/functions";
@@ -40,7 +38,6 @@ import { db } from "../lib/db.js";
 
 const MIGRATIONS_DIR = join(process.cwd(), "netlify/database/migrations");
 
-// Migraciones que YA existían antes de instalar este sistema.
 const PRE_EXISTENTES = ["0000_baseline", "0001_seed_data_supabase"];
 
 
@@ -53,15 +50,14 @@ function json(payload: unknown, status = 200): Response {
 
 
 /**
- * Divide un script SQL en statements individuales.
- *
- * Respeta:
+ * Divide un script SQL en statements individuales respetando:
  *   - Comentarios de línea  (-- ...)
  *   - Comentarios de bloque (slash-asterisk ... asterisk-slash)
  *   - Bloques dollar-quoted ($$ ... $$) usados en funciones plpgsql
+ *   - Strings entre comillas simples ('...') con escape '' interno
  *
- * El `;` solo cuenta como separador cuando NO estamos dentro de un
- * comentario ni de un bloque $$.
+ * El `;` solo cuenta como separador en modo "normal" — nunca dentro
+ * de un comentario, un string ni un bloque $$.
  */
 function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
@@ -69,12 +65,14 @@ function splitSqlStatements(sql: string): string[] {
   let inDollar = false;
   let inLineComment = false;
   let inBlockComment = false;
+  let inString = false;
   let i = 0;
 
   while (i < sql.length) {
     const c = sql[i];
     const n = sql[i + 1];
 
+    // Dentro de comentario de línea
     if (inLineComment) {
       current += c;
       if (c === "\n") inLineComment = false;
@@ -82,6 +80,7 @@ function splitSqlStatements(sql: string): string[] {
       continue;
     }
 
+    // Dentro de comentario de bloque
     if (inBlockComment) {
       current += c;
       if (c === "*" && n === "/") {
@@ -94,6 +93,36 @@ function splitSqlStatements(sql: string): string[] {
       continue;
     }
 
+    // Dentro de string con comillas simples
+    if (inString) {
+      current += c;
+      if (c === "'") {
+        // '' es escape, no fin de string
+        if (n === "'") {
+          current += "'";
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+
+    // Dentro de bloque $$ ... $$
+    if (inDollar) {
+      if (c === "$" && n === "$") {
+        current += "$$";
+        inDollar = false;
+        i += 2;
+        continue;
+      }
+      current += c;
+      i++;
+      continue;
+    }
+
+    // Modo normal: detectar inicios de modos especiales
     if (c === "-" && n === "-") {
       inLineComment = true;
       current += "--";
@@ -110,12 +139,19 @@ function splitSqlStatements(sql: string): string[] {
 
     if (c === "$" && n === "$") {
       current += "$$";
-      inDollar = !inDollar;
+      inDollar = true;
       i += 2;
       continue;
     }
 
-    if (c === ";" && !inDollar) {
+    if (c === "'") {
+      inString = true;
+      current += "'";
+      i++;
+      continue;
+    }
+
+    if (c === ";") {
       const trimmed = current.trim();
       if (trimmed) statements.push(trimmed);
       current = "";
@@ -139,6 +175,44 @@ async function listarCarpetasMigraciones(): Promise<string[]> {
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
     .sort();
+}
+
+
+/**
+ * Aplica el SQL de una migración. Devuelve null si OK, o un objeto
+ * { error, statement_preview } si falla.
+ *
+ * Estrategia:
+ *   1) Probar ejecutar todo el SQL de una sola llamada.
+ *   2) Si falla, trocear y ejecutar uno a uno hasta encontrar el statement
+ *      que rompe (más diagnóstico).
+ */
+async function aplicarMigracion(
+  sqlText: string,
+): Promise<null | { error: string; statement_preview: string }> {
+  const sqlAny: any = db.sql;
+
+  // Intento 1: todo de una vez
+  try {
+    await sqlAny.unsafe(sqlText);
+    return null;
+  } catch {
+    // pasamos a estrategia 2
+  }
+
+  // Intento 2: parser + uno a uno
+  const statements = splitSqlStatements(sqlText);
+  for (const stmt of statements) {
+    try {
+      await sqlAny.unsafe(stmt);
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        statement_preview: stmt.slice(0, 240),
+      };
+    }
+  }
+  return null;
 }
 
 
@@ -243,8 +317,6 @@ export default async (req: Request, _ctx: Context) => {
       errores: [],
     };
 
-    const sqlAny: any = db.sql;
-
     for (const folder of folders) {
       if (aplicadas.has(folder)) {
         resultado.ya_aplicadas.push(folder);
@@ -266,24 +338,14 @@ export default async (req: Request, _ctx: Context) => {
         continue;
       }
 
-      const statements = splitSqlStatements(sqlText);
-      let fallo = false;
+      const errorAplicacion = await aplicarMigracion(sqlText);
 
-      for (const stmt of statements) {
-        try {
-          await sqlAny.unsafe(stmt);
-        } catch (err) {
-          resultado.errores.push({
-            nombre: folder,
-            statement_preview: stmt.slice(0, 240),
-            error: err instanceof Error ? err.message : String(err),
-          });
-          fallo = true;
-          break;
-        }
-      }
-
-      if (!fallo) {
+      if (errorAplicacion) {
+        resultado.errores.push({
+          nombre: folder,
+          ...errorAplicacion,
+        });
+      } else {
         await db.sql`
           INSERT INTO _migrations (nombre)
           VALUES (${folder})
