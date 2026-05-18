@@ -5,55 +5,34 @@
  * lee las carpetas de `netlify/database/migrations/`, lleva la cuenta en
  * una tabla `_migrations`, y aplica solo las pendientes.
  *
- * USO:
+ * MODOS (todos vía query param):
  *
- *   1ª vez (one-shot tras desplegar este archivo):
- *      Llama a https://imperio-contenido.netlify.app/api/migrate?modo=marcar-existentes
- *      Esto registra 0000_baseline y 0001_seed_data_supabase como YA APLICADAS
- *      sin ejecutar nada (porque sus tablas ya existen en la BD desde antes
- *      de tener este sistema).
+ *   ?modo=marcar-existentes
+ *      Registra 0000_baseline y 0001_seed_data_supabase como YA APLICADAS
+ *      sin ejecutar nada. Solo se usa una vez tras instalar el sistema.
  *
- *   Normal (para cualquier migración futura):
- *      Llama a https://imperio-contenido.netlify.app/api/migrate
- *      La function aplica las pendientes que encuentre en el repo.
- *      Devuelve JSON con: ya_aplicadas, recien_aplicadas, saltadas, errores.
+ *   ?modo=diag
+ *      Devuelve info de diagnóstico: env vars (solo nombres), tipos de la
+ *      API de db.sql disponibles, listado de migraciones detectadas.
  *
- * Auth: protegida por el site password de Netlify (configurado a nivel
- * proyecto). No requiere token adicional.
+ *   (sin modo)
+ *      Aplica las migraciones pendientes que encuentre.
  *
- * Cómo añadir una migración futura:
- *   1. Crea `netlify/database/migrations/00NN_descripcion/migration.sql`
- *      con el SQL nuevo (usa CREATE TABLE IF NOT EXISTS y similares para
- *      que sea idempotente).
- *   2. Sube a GitHub. Netlify deploya.
- *   3. Abre /api/migrate en el navegador. Listo.
+ * Auth: protegida por el site password de Netlify.
  *
- * Implementación: usa `Pool` de @neondatabase/serverless (dep transitiva
- * de @netlify/database) para ejecutar el SQL completo de cada migración
- * dentro de una transacción real con rollback automático en fallo.
+ * Implementación: usa `db.sql` (que es el cliente neon de @netlify/database)
+ * con tagged template ARTIFICIAL para ejecutar SQL crudo dinámico. Esto
+ * evita necesitar un Pool separado con connection string explícita.
  */
 
 import type { Context, Config } from "@netlify/functions";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Pool } from "@neondatabase/serverless";
 import { db } from "../lib/db.js";
 
 const MIGRATIONS_DIR = join(process.cwd(), "netlify/database/migrations");
 
-// Migraciones que YA existían antes de instalar este sistema.
 const PRE_EXISTENTES = ["0000_baseline", "0001_seed_data_supabase"];
-
-// Netlify Database inyecta automáticamente la connection string en runtime.
-// Probamos los nombres de env var conocidos por orden de preferencia.
-function getConnectionString(): string | null {
-  return (
-    process.env.NETLIFY_DATABASE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.NEON_DATABASE_URL ||
-    null
-  );
-}
 
 
 function json(payload: unknown, status = 200): Response {
@@ -64,24 +43,170 @@ function json(payload: unknown, status = 200): Response {
 }
 
 
-export default async (req: Request, _ctx: Context) => {
-  const connectionString = getConnectionString();
-  if (!connectionString) {
-    return json(
-      {
-        error: "sin_connection_string",
-        mensaje:
-          "No se encontró ninguna de estas env vars: NETLIFY_DATABASE_URL, DATABASE_URL, NEON_DATABASE_URL",
-        env_vars_relacionadas: Object.keys(process.env).filter((k) =>
-          /DATABASE|NEON|POSTGRES|PG/.test(k),
-        ),
-      },
-      500,
-    );
+/**
+ * Ejecuta una sentencia SQL cruda usando db.sql.
+ *
+ * `db.sql` es una tagged template function: en JS, al hacer
+ *   sql`SELECT * FROM foo`
+ * el motor JS llama internamente a:
+ *   sql(["SELECT * FROM foo"], ...[])
+ * donde el primer argumento es un array con propiedad `raw`.
+ *
+ * Reconstruimos ese array manualmente para pasar SQL dinámico.
+ *
+ * Si esa vía falla, intenta llamar a sql.query() y luego a sql() como
+ * función directa, por compatibilidad con distintas versiones del cliente.
+ */
+async function execRawSQL(stmt: string): Promise<void> {
+  const sql: any = db.sql;
+
+  // Método 1: tagged template artificial. Es la vía que respeta exactamente
+  // cómo se construye internamente una llamada `sql`tag`.
+  try {
+    const strings = Object.assign([stmt], { raw: [stmt] });
+    await sql(strings);
+    return;
+  } catch (err1) {
+    // Método 2: sql.query(stmt) por si el cliente lo expone.
+    if (typeof sql.query === "function") {
+      try {
+        await sql.query(stmt);
+        return;
+      } catch {
+        // continuar al siguiente
+      }
+    }
+    // Método 3: llamada directa con string. Última opción.
+    try {
+      await sql(stmt);
+      return;
+    } catch {
+      // ninguna vía funcionó; relanzamos el primer error que suele ser
+      // el más informativo
+      throw err1;
+    }
+  }
+}
+
+
+/**
+ * Divide un script SQL en statements individuales.
+ * Respeta comentarios de línea (--), de bloque (slash-asterisk),
+ * y bloques dollar-quoted ($$ ... $$).
+ */
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = "";
+  let inDollar = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let i = 0;
+
+  while (i < sql.length) {
+    const c = sql[i];
+    const n = sql[i + 1];
+
+    if (inLineComment) {
+      current += c;
+      if (c === "\n") inLineComment = false;
+      i++;
+      continue;
+    }
+
+    if (inBlockComment) {
+      current += c;
+      if (c === "*" && n === "/") {
+        current += "/";
+        inBlockComment = false;
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    if (c === "-" && n === "-") {
+      inLineComment = true;
+      current += "--";
+      i += 2;
+      continue;
+    }
+
+    if (c === "/" && n === "*") {
+      inBlockComment = true;
+      current += "/*";
+      i += 2;
+      continue;
+    }
+
+    if (c === "$" && n === "$") {
+      current += "$$";
+      inDollar = !inDollar;
+      i += 2;
+      continue;
+    }
+
+    if (c === ";" && !inDollar) {
+      const trimmed = current.trim();
+      if (trimmed) statements.push(trimmed);
+      current = "";
+      i++;
+      continue;
+    }
+
+    current += c;
+    i++;
   }
 
+  const trimmed = current.trim();
+  if (trimmed) statements.push(trimmed);
+  return statements;
+}
+
+
+async function listarCarpetasMigraciones(): Promise<string[]> {
+  const entries = await readdir(MIGRATIONS_DIR, { withFileTypes: true });
+  return entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+}
+
+
+export default async (req: Request, _ctx: Context) => {
   try {
-    // 1. Asegurar la tabla de control. Idempotente.
+    const url = new URL(req.url);
+    const modo = url.searchParams.get("modo");
+
+    // ── MODO DIAG ─────────────────────────────────────────
+    if (modo === "diag") {
+      const sqlAny: any = db.sql;
+      let folders: string[] = [];
+      let errorListando: string | null = null;
+      try {
+        folders = await listarCarpetasMigraciones();
+      } catch (err) {
+        errorListando = err instanceof Error ? err.message : String(err);
+      }
+
+      return json({
+        modo: "diag",
+        env_keys: Object.keys(process.env).sort(),
+        db_sql: {
+          tipo: typeof sqlAny,
+          tiene_query: typeof sqlAny?.query === "function",
+          tiene_unsafe: typeof sqlAny?.unsafe === "function",
+          tiene_transaction: typeof sqlAny?.transaction === "function",
+          es_callable: typeof sqlAny === "function",
+        },
+        migrations_dir: MIGRATIONS_DIR,
+        cwd: process.cwd(),
+        carpetas_detectadas: folders,
+        error_listando: errorListando,
+      });
+    }
+
+    // 1. Asegurar la tabla de control.
     await db.sql`
       CREATE TABLE IF NOT EXISTS _migrations (
         nombre      text PRIMARY KEY,
@@ -89,14 +214,10 @@ export default async (req: Request, _ctx: Context) => {
       )
     `;
 
-    // 2. Listar carpetas de migración en orden alfabético (= cronológico).
+    // 2. Listar carpetas.
     let folders: string[] = [];
     try {
-      const entries = await readdir(MIGRATIONS_DIR, { withFileTypes: true });
-      folders = entries
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name)
-        .sort();
+      folders = await listarCarpetasMigraciones();
     } catch (err) {
       return json(
         {
@@ -108,10 +229,7 @@ export default async (req: Request, _ctx: Context) => {
       );
     }
 
-    // 3. ¿Modo "marcar-existentes"? Registra las pre-existentes sin ejecutar.
-    const url = new URL(req.url);
-    const modo = url.searchParams.get("modo");
-
+    // ── MODO MARCAR-EXISTENTES ────────────────────────────
     if (modo === "marcar-existentes") {
       const marcadas: string[] = [];
       const ignoradas: string[] = [];
@@ -138,7 +256,7 @@ export default async (req: Request, _ctx: Context) => {
       });
     }
 
-    // 4. Modo normal: ejecutar pendientes.
+    // ── MODO NORMAL ───────────────────────────────────────
     const aplicadasRows = await db.sql<{ nombre: string }>`
       SELECT nombre FROM _migrations
     `;
@@ -148,7 +266,7 @@ export default async (req: Request, _ctx: Context) => {
       ya_aplicadas: string[];
       recien_aplicadas: string[];
       saltadas: { nombre: string; razon: string }[];
-      errores: { nombre: string; error: string }[];
+      errores: { nombre: string; statement_preview: string; error: string }[];
     } = {
       ya_aplicadas: [],
       recien_aplicadas: [],
@@ -156,62 +274,52 @@ export default async (req: Request, _ctx: Context) => {
       errores: [],
     };
 
-    // Pool nuevo por invocación. Las functions serverless son short-lived,
-    // así que crear y cerrar el pool por request es lo correcto.
-    const pool = new Pool({ connectionString });
+    for (const folder of folders) {
+      if (aplicadas.has(folder)) {
+        resultado.ya_aplicadas.push(folder);
+        continue;
+      }
 
-    try {
-      for (const folder of folders) {
-        if (aplicadas.has(folder)) {
-          resultado.ya_aplicadas.push(folder);
-          continue;
-        }
+      const sqlPath = join(MIGRATIONS_DIR, folder, "migration.sql");
 
-        const sqlPath = join(MIGRATIONS_DIR, folder, "migration.sql");
+      let sqlText: string;
+      try {
+        sqlText = await readFile(sqlPath, "utf8");
+      } catch (err) {
+        resultado.saltadas.push({
+          nombre: folder,
+          razon:
+            "No se pudo leer migration.sql: " +
+            (err instanceof Error ? err.message : String(err)),
+        });
+        continue;
+      }
 
-        let sqlText: string;
+      const statements = splitSqlStatements(sqlText);
+      let fallo = false;
+
+      for (const stmt of statements) {
         try {
-          sqlText = await readFile(sqlPath, "utf8");
+          await execRawSQL(stmt);
         } catch (err) {
-          resultado.saltadas.push({
-            nombre: folder,
-            razon:
-              "No se pudo leer migration.sql: " +
-              (err instanceof Error ? err.message : String(err)),
-          });
-          continue;
-        }
-
-        // Ejecutar la migración entera en una transacción.
-        // Pool.query() del cliente WebSocket de neon soporta multi-statement
-        // SQL nativamente, incluidos bloques $$ ... $$ y funciones plpgsql.
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          await client.query(sqlText);
-          await client.query(
-            "INSERT INTO _migrations (nombre) VALUES ($1) ON CONFLICT (nombre) DO NOTHING",
-            [folder],
-          );
-          await client.query("COMMIT");
-          resultado.recien_aplicadas.push(folder);
-        } catch (err) {
-          try {
-            await client.query("ROLLBACK");
-          } catch {
-            // Si el ROLLBACK falla, seguimos. El error principal es el de
-            // la migración, no el del rollback.
-          }
           resultado.errores.push({
             nombre: folder,
+            statement_preview: stmt.slice(0, 240),
             error: err instanceof Error ? err.message : String(err),
           });
-        } finally {
-          client.release();
+          fallo = true;
+          break;
         }
       }
-    } finally {
-      await pool.end();
+
+      if (!fallo) {
+        await db.sql`
+          INSERT INTO _migrations (nombre)
+          VALUES (${folder})
+          ON CONFLICT (nombre) DO NOTHING
+        `;
+        resultado.recien_aplicadas.push(folder);
+      }
     }
 
     const status = resultado.errores.length > 0 ? 500 : 200;
