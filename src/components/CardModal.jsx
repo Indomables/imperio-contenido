@@ -129,7 +129,7 @@ export default function CardModal({ kind, data, onClose, onUpdate }) {
         {/* ─── BODY ─── */}
         <div className="somal-body">
           {isPieza
-            ? <PiezaSections draft={draft} setField={setField} setContenidoField={setContenidoField} tituloRef={tituloRef} editorRef={editorRef} requeridosLeft={requeridosLeft} wordCount={wordCount} readingMin={readingMin} />
+            ? <PiezaSections draft={draft} setField={setField} setContenidoField={setContenidoField} tituloRef={tituloRef} editorRef={editorRef} requeridosLeft={requeridosLeft} wordCount={wordCount} readingMin={readingMin} setPickerOpen={setPickerOpen} />
             : <IdeaSections draft={draft} setField={setField} tituloRef={tituloRef} requeridosLeft={requeridosLeft} wordCount={wordCount} />
           }
         </div>
@@ -231,7 +231,7 @@ function IdeaSections({ draft, setField, tituloRef, requeridosLeft, wordCount })
   );
 }
 
-function PiezaSections({ draft, setField, setContenidoField, tituloRef, editorRef, requeridosLeft, wordCount, readingMin }) {
+function PiezaSections({ draft, setField, setContenidoField, tituloRef, editorRef, requeridosLeft, wordCount, readingMin, setPickerOpen }) {
   const ventanaState = draft.fecha_publicacion ? "AGENDADA" : "LIBRE";
 
   return (
