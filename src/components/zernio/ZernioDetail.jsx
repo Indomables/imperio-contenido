@@ -254,7 +254,11 @@ export default function ZernioDetail({
               <button type="button" className="zd-btn danger" onClick={onDiscard}>
                 Descartar
               </button>
-              <button type="button" className="zd-btn" onClick={onTag}>
+              <button
+                type="button"
+                className="zd-btn"
+                onClick={(e) => onTag?.(e.currentTarget)}
+              >
                 Etiquetar como…
               </button>
               <button type="button" className="zd-btn advanced" onClick={onPromote}>
