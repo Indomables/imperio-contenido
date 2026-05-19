@@ -5,10 +5,11 @@ export default async (_req: Request, _ctx: Context) => {
   try {
     const eventos = await db.sql`
       SELECT id, event_id, tipo, recibido_at, procesado_ok,
-             COALESCE(error_msg, '') AS error_msg
+             COALESCE(error_msg, '') AS error_msg,
+             payload
       FROM zernio_eventos
       ORDER BY recibido_at DESC
-      LIMIT 10
+      LIMIT 5
     `;
 
     const clasificaciones = await db.sql`
