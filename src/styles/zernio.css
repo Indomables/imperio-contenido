@@ -820,3 +820,89 @@
   max-width: 320px;
   letter-spacing: -0.005em;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+ * ITERACIÓN 2 · ADDITIONS
+ * Estilos del toggle DEMO para forzar estados especiales.
+ * Pensado para borrar cuando el backend real entregue cada estado por sí solo.
+ * ═══════════════════════════════════════════════════════════════ */
+
+.zstate-override {
+  position: fixed;
+  bottom: 56px;
+  left: 18px;
+  z-index: 80;
+  font-family: var(--mono);
+}
+
+.zstate-override-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 11px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  color: var(--ink-4);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.zstate-override-toggle svg {
+  width: 11px; height: 11px;
+  flex-shrink: 0;
+}
+.zstate-override-toggle:hover {
+  border-color: var(--acc);
+  color: var(--acc);
+  box-shadow: var(--acc-glow);
+}
+
+.zstate-override-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 200px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.5);
+}
+
+.zstate-override-hd {
+  padding: 8px 10px 4px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--ink-5);
+  text-transform: uppercase;
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 4px;
+}
+
+.zstate-override-opt {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.10s, background 0.10s;
+}
+.zstate-override-opt:hover { color: var(--ink); background: var(--bg-2); }
+.zstate-override-opt.on { color: var(--acc); }
+.zstate-override-opt .dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--ink-5);
+  flex-shrink: 0;
+}
+.zstate-override-opt.on .dot { background: var(--acc); box-shadow: var(--acc-glow); }

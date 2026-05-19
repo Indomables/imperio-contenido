@@ -1,18 +1,8 @@
 /**
  * ZernioSidebar — Columna izquierda (260px) con 3 paneles apilados.
  *
- * Estructura del handoff Claude Design (`.zside`):
- *   ┌───────────────┐
- *   │ 01 · Edge fn  │  Health (LED + estado + métricas 2x2)
- *   ├───────────────┤
- *   │ 02 · Pulso    │  Contadores (Pendientes, Decididas hoy, etc)
- *   ├───────────────┤
- *   │ 03 · Filtros  │  Chips: Intención · Temperatura · Confianza
- *   └───────────────┘
- *
- * Iteración 1: chrome visible, datos a "—". Los chips son visualmente
- * activos para que se vea su estética, pero NO filtran nada. Los counters
- * de cada chip se ocultan en v1.
+ * v0.59.0-α · Iteración 2: filtros operativos, contadores derivados del mock,
+ * edge health dinámica (estado operational/degraded/down con LED y desc adaptados).
  */
 
 const INTENT_CHIPS = [
@@ -35,7 +25,23 @@ const CONF_CHIPS = [
   { id: "low",  label: "< 50%" },
 ];
 
-export default function ZernioSidebar() {
+const HEALTH_LABELS = {
+  operational: { label: "OPERATIVO",  className: "" },
+  degraded:    { label: "DEGRADADO",  className: "warn" },
+  down:        { label: "CAÍDA",      className: "down" },
+};
+
+export default function ZernioSidebar({
+  edgeHealth,
+  counters,
+  filters,
+  onToggleIntent,
+  onToggleTemperature,
+  onSetConfidenceRange,
+  onResetFilters,
+}) {
+  const health = HEALTH_LABELS[edgeHealth?.state || "operational"];
+
   return (
     <aside className="zside">
 
@@ -51,32 +57,40 @@ export default function ZernioSidebar() {
           </div>
           <div className="meta">v3.2</div>
         </header>
-        <div className="zhealth">
+        <div className={`zhealth${health.className ? " " + health.className : ""}`}>
           <div className="row1">
             <span className="led"></span>
             <span>
-              ESTADO · <b className="acc">OPERATIVO</b>
+              ESTADO · <b className="acc">{health.label}</b>
             </span>
           </div>
-          <div className="desc">
-            Esperando primer DM. Webhook conectado y a la escucha.
-          </div>
+          <div className="desc">{healthDesc(edgeHealth)}</div>
           <div className="stack">
             <div>
               <span className="k">Procesadas 24h</span>
-              <span className="v">—</span>
+              <span className="v acc">{edgeHealth?.processedLast24h ?? "—"}</span>
             </div>
             <div>
               <span className="k">Latencia p95</span>
-              <span className="v">—</span>
+              <span className="v">
+                {edgeHealth?.latencyP95Ms ? `${edgeHealth.latencyP95Ms}ms` : "—"}
+              </span>
             </div>
             <div>
               <span className="k">Tasa éxito</span>
-              <span className="v">—</span>
+              <span className="v acc">
+                {edgeHealth?.successRate != null
+                  ? `${(edgeHealth.successRate * 100).toFixed(1)}%`
+                  : "—"}
+              </span>
             </div>
             <div>
               <span className="k">Reintentos</span>
-              <span className="v">—</span>
+              <span className="v">
+                {edgeHealth?.retries != null
+                  ? String(edgeHealth.retries).padStart(2, "0")
+                  : "—"}
+              </span>
             </div>
           </div>
         </div>
@@ -99,19 +113,25 @@ export default function ZernioSidebar() {
         <div className="zpanel-b flush zcount">
           <div className="zcount-row big">
             <span className="k">Pendientes</span>
-            <span className="v">0</span>
+            <span className="v">{counters?.pendingCount ?? 0}</span>
           </div>
           <div className="zcount-row">
             <span className="k">Decididas hoy</span>
-            <span className="v">—</span>
+            <span className="v">{counters?.decidedToday ?? 0}</span>
           </div>
           <div className="zcount-row">
             <span className="k">Esta semana</span>
-            <span className="v">—</span>
+            <span className="v">
+              {counters?.decidedWeek ?? 0}
+              <small>/30</small>
+            </span>
           </div>
           <div className="zcount-row">
             <span className="k">Tasa enrolamiento</span>
-            <span className="v">—</span>
+            <span className="v">
+              {counters?.enrolmentRate ?? 0}
+              <small>%</small>
+            </span>
           </div>
         </div>
       </section>
@@ -139,7 +159,7 @@ export default function ZernioSidebar() {
               textTransform: "uppercase",
               cursor: "pointer",
             }}
-            disabled
+            onClick={onResetFilters}
           >
             RESET
           </button>
@@ -153,11 +173,12 @@ export default function ZernioSidebar() {
                 <button
                   key={c.id}
                   type="button"
-                  className={`zchip int-${c.id} on`}
-                  disabled
+                  className={`zchip int-${c.id}${filters?.intents.has(c.id) ? " on" : ""}`}
+                  onClick={() => onToggleIntent?.(c.id)}
                 >
                   <span className="d"></span>
                   {c.label}
+                  <span className="ct">{counters?.pendingByIntent?.[c.id] ?? 0}</span>
                 </button>
               ))}
             </div>
@@ -170,11 +191,12 @@ export default function ZernioSidebar() {
                 <button
                   key={c.id}
                   type="button"
-                  className={`zchip temp-${c.id} on`}
-                  disabled
+                  className={`zchip temp-${c.id}${filters?.temperatures.has(c.id) ? " on" : ""}`}
+                  onClick={() => onToggleTemperature?.(c.id)}
                 >
                   <span className="d"></span>
                   {c.label}
+                  <span className="ct">{counters?.pendingByTemp?.[c.id] ?? 0}</span>
                 </button>
               ))}
             </div>
@@ -183,12 +205,12 @@ export default function ZernioSidebar() {
           <div className="zfilter-group">
             <div className="lbl">Confianza</div>
             <div className="chips">
-              {CONF_CHIPS.map((c, i) => (
+              {CONF_CHIPS.map((c) => (
                 <button
                   key={c.id}
                   type="button"
-                  className={`zchip${i === 0 ? " on" : ""}`}
-                  disabled
+                  className={`zchip${filters?.confidenceRange === c.id ? " on" : ""}`}
+                  onClick={() => onSetConfidenceRange?.(c.id)}
                 >
                   {c.label}
                 </button>
@@ -203,7 +225,51 @@ export default function ZernioSidebar() {
   );
 }
 
-/* Semana ISO actual (calculada en cliente, sin libs). */
+function healthDesc(health) {
+  if (!health) return "Esperando primer DM.";
+  if (health.state === "operational") {
+    const latency = health.latencyMeanMs ? `${health.latencyMeanMs}ms` : "—";
+    const lastMin = health.lastProcessedAt
+      ? Math.max(1, Math.round((Date.now() - health.lastProcessedAt) / 60000))
+      : null;
+    return (
+      <>
+        Procesando DMs en tiempo real. Latencia media <b>{latency}</b>.
+        {lastMin != null && (
+          <>
+            {" "}
+            Último clasificado hace <b>{lastMin} min</b>.
+          </>
+        )}
+      </>
+    );
+  }
+  if (health.state === "degraded") {
+    return (
+      <>
+        Latencia elevada. <b>{health.retries}</b> reintentos en cola. La cola
+        sigue procesándose pero con retraso.
+      </>
+    );
+  }
+  if (health.state === "down") {
+    const downMin = health.downSinceMs
+      ? Math.round((Date.now() - health.downSinceMs) / 60000)
+      : null;
+    return (
+      <>
+        Edge function no responde {downMin != null && (
+          <>
+            desde hace <b>{downMin} min</b>.
+          </>
+        )}{" "}
+        Los DMs entrantes se acumulan en la cola de Zernio.
+      </>
+    );
+  }
+  return "—";
+}
+
 function currentISOWeek() {
   const d = new Date();
   const u = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
