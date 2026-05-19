@@ -62,6 +62,22 @@ export default function TopNav() {
           </svg>
           Análisis
         </NavLink>
+        <NavLink
+          to="/zernio"
+          className={({ isActive }) => `subtab${isActive ? " on" : ""}`}
+        >
+          <svg
+            className="ico"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+          >
+            <path d="M2 4h12v8H2z" />
+            <path d="M2 4l6 4 6-4" />
+          </svg>
+          Zernio
+        </NavLink>
       </div>
 
       <div className="contenido-stats">

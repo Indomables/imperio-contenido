@@ -9,6 +9,7 @@ import { PageStatusProvider } from "./lib/pageStatus.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Tablero from "./pages/Tablero.jsx";
 import Analisis from "./pages/Analisis.jsx";
+import Zernio from "./pages/Zernio.jsx";
 
 export default function App() {
   // El boot oculta el #boot tras 2.8s mediante CSS animation
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/tablero" element={<Tablero />} />
           <Route path="/analisis" element={<Analisis />} />
+          <Route path="/zernio" element={<Zernio />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
 
