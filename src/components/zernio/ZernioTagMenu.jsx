@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import SomaAudio from "../../lib/soma-audio";
 
 const TAGS = [
   { id: "cliente-hermandad",     label: "Cliente · Hermandad",     group: "Cliente existente" },
@@ -72,6 +73,7 @@ export default function ZernioTagMenu({ open, anchorRect, onPick, onClose }) {
               type="button"
               className="ztagmenu-opt"
               onClick={() => {
+                SomaAudio.send();
                 onPick?.(tag);
                 onClose?.();
               }}
