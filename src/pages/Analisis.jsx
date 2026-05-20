@@ -1,6 +1,10 @@
 /**
  * Análisis — Performance por formato y período.
  *
+ * v0.62: añadido AnalisisChat (chat IA con tools de Kit) bajo el
+ * KPI strip, y handler de evento global "app:refresh" para que el
+ * botón Recargar del TopNav refresque también esta pestaña.
+ *
  * v0.44.1: benchmarks visuales y micro-bars de colores.
  *  · KPIs con sublínea que compara contra benchmark del sector:
  *      ↑ por encima · ≈ benchmark sector · ↓ por debajo · — sin datos
@@ -24,6 +28,7 @@ import {
   ideas as ideasApi,
 } from "../lib/api";
 import CardModal from "../components/CardModal";
+import AnalisisChat from "../components/AnalisisChat";
 import { usePageStatus } from "../lib/pageStatus.jsx";
 
 // ─── Benchmarks del sector (creator economy / email marketing) ────
@@ -52,10 +57,9 @@ const FORMATO_CONFIG = {
       { key: "enviados",      label: "Enviados",    source: "enviados",      type: "int" },
       { key: "aperturas",     label: "Aperturas",   source: "aperturas",     type: "int" },
       { key: "tasa_apertura", label: "% Apertura",  source: "tasa_apertura", type: "pct", benchmark: BENCHMARKS.tasa_apertura, accent: "pos" },
-      // Clics y % Clics: aún no hay tracking activo (Kit / Zernio).
-      // noTrackingYet hace que el "0" salga en gris (val dash) en lugar de
-      // en blanco — señaliza visualmente "no es 0 real, es ausencia de dato".
-      { key: "clics",         label: "Clics",       source: "clics",         type: "int", noTrackingYet: true },
+      // Clics y % Clics: con el broadcast_clicks de Kit ya activos en
+      // auto-publish.mts. Si Soma no usa CTAs en un email concreto, saldrá 0.
+      { key: "clics",         label: "Clics",       source: "clics",         type: "int" },
       { key: "tasa_clics",    label: "% Clics",     source: "tasa_clics",    type: "pct", benchmark: BENCHMARKS.tasa_clics },
       { key: "replies",       label: "Replies",     source: "replies",       type: "int" },
       { key: "bajas",         label: "Bajas",       source: "bajas",         type: "int" },
@@ -272,6 +276,15 @@ export default function Analisis() {
 
   useEffect(() => { reload(); }, [reload]);
 
+  // ── Escuchar evento global "app:refresh" del botón Recargar del TopNav.
+  // Cuando llega, vuelve a hacer reload() sin tocar otros estados (filtros,
+  // sort, página seleccionada).
+  useEffect(() => {
+    const handler = () => reload();
+    window.addEventListener("app:refresh", handler);
+    return () => window.removeEventListener("app:refresh", handler);
+  }, [reload]);
+
   const metricasMap = useMemo(() => {
     const m = new Map();
     for (const row of metricasArr) m.set(row.pieza_id, row.datos || {});
@@ -282,9 +295,6 @@ export default function Analisis() {
   const periodoLabel = periodo === "all" ? "historial completo" : periodoConf.label.toLowerCase();
 
   // Contadores por formato (con periodo aplicado)
-  // SOLO cuenta piezas que estén en columna="publicado" Y con fecha pasada.
-  // (No basta con la fecha — una pieza puede tener fecha pasada y estar aún
-  //  en "agendado" si no se publicó realmente.)
   const counts = useMemo(() => {
     const c = { email: 0, reel: 0, relampago: 0, youtube: 0, grieta: 0 };
     for (const p of piezas) {
@@ -337,9 +347,6 @@ export default function Analisis() {
   }, [rows, sort, formato]);
 
   // ─── StatusBar contextual ──────────────────────────────────────
-  // Reportamos a la StatusBar global qué pestaña/filtro/filas estamos
-  // viendo. Se limpia automáticamente al desmontar (al cambiar de
-  // pestaña) gracias al useEffect interno de usePageStatus.
   const pageStatus = useMemo(
     () => ({
       left: [
@@ -395,12 +402,10 @@ export default function Analisis() {
 
     if (col.type === "pct") {
       const benchmark = col.benchmark;
-      // Las columnas % Bajas usan container más estrecho (clase tiny → 60px en vez de 80px)
       const tinyClass = col.source === "tasa_bajas" ? "tiny" : "";
 
       const has = raw !== null && raw !== undefined && raw !== "" && !Number.isNaN(Number(raw));
       if (!has) {
-        // Sin valor: dash + barra mute con 2% de fill (apenas visible, presente)
         return (
           <div className="bar-cell">
             <span className="pct" style={{ color: "var(--ink-4)" }}>—</span>
@@ -410,10 +415,9 @@ export default function Analisis() {
       }
       const n = Number(raw);
       const cls = barClass(raw, benchmark);
-      // Escala absoluta por columna: barScale = valor al que la barra llega al 100%.
       const scale = benchmark?.barScale ?? 100;
       const w = n === 0
-        ? 2  // 0% → micro-bar casi vacía pero presente (como en Claude Design)
+        ? 2
         : Math.min(100, Math.max(2, (n / scale) * 100));
       return (
         <div className="bar-cell">
@@ -425,16 +429,11 @@ export default function Analisis() {
       );
     }
 
-    // int / eur / fallback
     let formatted = null;
     if (col.type === "int") formatted = formatInt(raw);
     else if (col.type === "eur") formatted = formatEur(raw);
     else formatted = raw ?? null;
 
-    // Cuando una columna está marcada como sin tracking activo (ej. Clics
-    // mientras la edge function de Kit no esté portada), un 0 se muestra
-    // en gris ("val dash") en lugar de blanco — comunica "no es 0 real,
-    // no tenemos el dato todavía".
     const dimZero = col.noTrackingYet && Number(raw) === 0;
 
     return (
@@ -502,6 +501,11 @@ export default function Analisis() {
         ))}
       </div>
 
+      {/* Chat IA — solo en formato Email donde tiene sentido (tools de Kit).
+          A futuro podemos exponer también herramientas para los formatos
+          de video (YouTube Analytics, IG Insights) y mostrarlo siempre. */}
+      {formato === "email" && <AnalisisChat />}
+
       <div className="an-table-wrap">
         <table className="an-table">
           <thead>
@@ -544,11 +548,6 @@ export default function Analisis() {
               sortedRows.map((row, idx) => {
                 const p = row.pieza;
                 const idea = p.idea_id ? ideasById.get(p.idea_id) : null;
-                // La fila más reciente lleva el recuadro dorado (highlighted) —
-                // refuerza dónde se mira primero. Solo aplica cuando el orden es
-                // por fecha desc (el orden por defecto); si Soma reordena por
-                // otra columna, el "idx 0" deja de ser "lo más reciente" y no
-                // debería destacarse arbitrariamente.
                 const isHighlighted =
                   idx === 0 && sort.key === "fecha" && sort.dir === "desc";
                 return (
