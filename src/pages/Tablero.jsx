@@ -1,6 +1,9 @@
 /**
  * Tablero — Kanban de 5 carriles.
  *
+ * v0.62: añadido handler de evento global "app:refresh" para que el
+ * botón Recargar del TopNav refresque también esta pestaña.
+ *
  * v0.45.0-α · Paridad pixel-perfect con la maqueta de Claude Design.
  *  · Carril 01 "Ideas" → tabla ideas, con filtros (Todas/Sin piezas/Con piezas).
  *    - Cards con .excerpt (3 líneas clamp del contenido) + footer pieza-count + cut-btn.
@@ -32,9 +35,6 @@ import KitIdModal from "../components/KitIdModal";
 import MetricasManualesModal from "../components/MetricasManualesModal";
 import { usePageStatus } from "../lib/pageStatus.jsx";
 
-// Carriles de piezas — meta de cada columna del kanban.
-// 04 lleva `state: "active"` → estilos blancos brillantes en el header.
-// 05 lleva `state: "publicado"` → gradient verde completo en toda la columna.
 const CARRIL_PIEZAS = [
   { ix: "02", nm: "En desarrollo", sub: "Tomando forma", dotsOn: 2, columna: "desarrollo", state: ""          },
   { ix: "03", nm: "Listo",          sub: "Preparado",     dotsOn: 3, columna: "listo",      state: ""          },
@@ -50,7 +50,6 @@ const FORMATO_LABEL = {
   grieta:    "Grieta",
 };
 
-// Label corto de columna para el popover de piezas asociadas.
 const COLUMNA_LABEL = {
   desarrollo: "En desarrollo",
   listo:      "Listo",
@@ -58,8 +57,6 @@ const COLUMNA_LABEL = {
   publicado:  "Publicado",
 };
 
-// Subtítulo descriptivo para cards en "En desarrollo" si no tienen
-// plataformas[] definido. (.subnm en el HTML de Claude Design.)
 const SUBNM_DEFAULT = {
   email:     "Email · newsletter",
   youtube:   "YouTube · long-form",
@@ -77,7 +74,6 @@ function stripHtml(html) {
   return (tmp.textContent || tmp.innerText || "").trim();
 }
 
-// Formato "MIÉ, 17 MAY · 18:00" (futuro) o "LUN, 11 MAY" (pasado, sin hora).
 function formatKdate(iso, withTime = true) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -100,8 +96,6 @@ function isFuture(iso) {
   return new Date(iso).getTime() > Date.now();
 }
 
-// Subnm para "En desarrollo": si la pieza tiene `plataformas[]` con valores,
-// los unimos; si no, usamos el default por formato.
 function subnmFor(p) {
   if (Array.isArray(p.plataformas) && p.plataformas.length > 0) {
     return p.plataformas.join(" · ");
@@ -109,7 +103,6 @@ function subnmFor(p) {
   return SUBNM_DEFAULT[p.formato] || FORMATO_LABEL[p.formato] || p.formato;
 }
 
-// SVG calendario reutilizable para .kdate.future
 function CalIcon() {
   return (
     <svg className="icon" viewBox="0 0 14 14" fill="none"
@@ -120,8 +113,6 @@ function CalIcon() {
   );
 }
 
-// Icono "estadísticas" (3 barras verticales) — usado en cards de
-// email/relampago publicado para abrir las métricas manuales.
 function StatsIcon() {
   return (
     <svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12">
@@ -143,31 +134,14 @@ export default function Tablero() {
   const [captureText, setCaptureText] = useState("");
   const [captureTag, setCaptureTag] = useState("idea");
   const [capturing, setCapturing] = useState(false);
-  // Filtro de la columna Ideas: "todas" | "sin" | "con"
   const [ideasFilter, setIdeasFilter] = useState("todas");
   const captureRef = useRef(null);
 
-  // Modales de creación:
-  //   newIdeaOpen      → "+" del carril 01 Ideas
-  //   newPiezaContext  → { ideaId, ideaTitle } si viene de "Dar forma" de una idea
-  //                    → {} si viene de "+" del carril 02 Desarrollo
-  //                    → null si el modal está cerrado
   const [newIdeaOpen, setNewIdeaOpen] = useState(false);
   const [newPiezaContext, setNewPiezaContext] = useState(null);
-  // Mini-modal específico para meter/cambiar el ID de Kit broadcast.
-  // Se abre con el icono ⚡ en cards de email/relampago en columna agendado.
   const [kitIdModalPieza, setKitIdModalPieza] = useState(null);
-  // Mini-modal para meter métricas manuales (replies + revenue_eur).
-  // Se abre con el icono ▥ (StatsIcon) en cards de email/relampago publicadas.
   const [metricasModalPieza, setMetricasModalPieza] = useState(null);
-  // Popover que enumera las piezas asociadas a una idea. Se abre al
-  // hacer click sobre el contador "N piezas" en las cards de Ideas.
-  // Guarda el id de la idea cuya lista de piezas está visible.
   const [piezasPopoverIdeaId, setPiezasPopoverIdeaId] = useState(null);
-  // Modal de confirmación para eliminaciones. `confirmDel` guarda
-  // { kind, id, label } cuando hay una acción pendiente de confirmar.
-  // Reemplaza window.confirm() porque Chromium permite al usuario
-  // marcar "Impedir más diálogos" y dejarlos no operativos en silencio.
   const [confirmDel, setConfirmDel] = useState(null);
 
   const reload = useCallback(async () => {
@@ -186,7 +160,13 @@ export default function Tablero() {
 
   useEffect(() => { reload(); }, [reload]);
 
-  // Cierra el popover de piezas asociadas con ESC o al hacer click fuera.
+  // Escuchar evento global "app:refresh" del botón Recargar del TopNav.
+  useEffect(() => {
+    const handler = () => reload();
+    window.addEventListener("app:refresh", handler);
+    return () => window.removeEventListener("app:refresh", handler);
+  }, [reload]);
+
   useEffect(() => {
     if (!piezasPopoverIdeaId) return;
     const onKey = (e) => { if (e.key === "Escape") setPiezasPopoverIdeaId(null); };
@@ -199,7 +179,6 @@ export default function Tablero() {
     };
   }, [piezasPopoverIdeaId]);
 
-  // Índice de piezas por idea_id para lookup rápido y aplicar filtros de Ideas.
   const piezasByIdea = useMemo(() => {
     const m = new Map();
     for (const p of piezas) {
@@ -219,7 +198,6 @@ export default function Tablero() {
     });
   }, [ideas, ideasFilter, piezasByIdea]);
 
-  // Contadores por filtro para los chips (Todas/Sin/Con)
   const ideasCounts = useMemo(() => {
     let con = 0, sin = 0;
     for (const idea of ideas) {
@@ -229,10 +207,6 @@ export default function Tablero() {
     return { todas: ideas.length, con, sin };
   }, [ideas, piezasByIdea]);
 
-  // Filtra piezas por columna y aplica orden cronológico cuando corresponde:
-  //  · agendado  → fecha_publicacion ASC (más próximo a publicar arriba)
-  //  · publicado → fecha_publicacion DESC (más reciente publicado arriba)
-  //  · resto     → orden por defecto (created_at DESC del backend)
   const piezasPorColumna = (col) => {
     const lista = piezas.filter((p) => p.columna === col);
     if (col === "agendado") {
@@ -252,15 +226,10 @@ export default function Tablero() {
     return lista;
   };
 
-  // Contadores para la statusbar inferior (los reporta usePageStatus abajo).
-  // PIEZAS = todas las no publicadas (igual que en Dashboard).
   const cuentaAgendadas  = piezas.filter((p) => p.columna === "agendado").length;
   const cuentaPublicadas = piezas.filter((p) => p.columna === "publicado").length;
   const cuentaNoPublicadas = piezas.length - cuentaPublicadas;
 
-  // ─── StatusBar contextual ────────────────────────────────────
-  // Reportamos contadores reales al right del statusbar (antes salían
-  // como `—` porque no había context aplicado a esta pestaña).
   const pageStatus = useMemo(
     () => ({
       right: [
@@ -274,12 +243,6 @@ export default function Tablero() {
   );
   usePageStatus(pageStatus);
 
-  // ─── Drag & Drop entre carriles ──────────────────────────────
-  // - Solo se arrastran piezas (carriles 02-05). Las ideas (01) no son
-  //   arrastrables: el flujo idea → pieza pasa por el botón ✂ "Dar forma".
-  // - Drop zones: las 4 columnas de piezas (no la columna Ideas).
-  // - Update optimista: cambio columna en estado local de inmediato y luego
-  //   sincronizo con la BD; si falla, revierto.
   const [dragOver, setDragOver] = useState(null);
 
   function handleDragStart(e, pieza) {
@@ -297,8 +260,6 @@ export default function Tablero() {
   }
 
   function handleDragLeave(e, columna) {
-    // Solo limpiar si el target relacionado ya no está dentro de la columna
-    // (evita parpadeo al cruzar hijos)
     if (e.currentTarget.contains(e.relatedTarget)) return;
     if (dragOver === columna) setDragOver(null);
   }
@@ -312,7 +273,6 @@ export default function Tablero() {
     try { data = JSON.parse(raw); } catch { return; }
     if (!data?.id || !data?.from || data.from === toColumna) return;
 
-    // Optimistic: actualizo UI ya
     const prev = piezas;
     setPiezas((arr) =>
       arr.map((p) => (p.id === data.id ? { ...p, columna: toColumna } : p)),
@@ -321,13 +281,11 @@ export default function Tablero() {
     try {
       await piezasApi.update(data.id, { columna: toColumna });
     } catch (err) {
-      // Revert si la API falla
       setPiezas(prev);
       setErr(`Mover falló: ${err.message || err}`);
     }
   }
 
-  // ─── Acciones ────────────────────────────────────────────────
   async function handleCapture(e) {
     e.preventDefault();
     if (!captureText.trim() || capturing) return;
@@ -355,8 +313,6 @@ export default function Tablero() {
     }
   }
 
-  // Borrado puro — sin confirmación. La UI (ConfirmModal) ya se ha
-  // encargado de confirmar antes de llamar a esta función.
   async function handleDelete(kind, id) {
     if (kind === "idea") {
       await ideasApi.remove(id);
@@ -368,10 +324,6 @@ export default function Tablero() {
     setSelected(null);
   }
 
-  // Click en + de columna → abre el modal correspondiente.
-  //   "ideas"      → NuevaIdeaModal
-  //   "desarrollo" → NuevaPiezaModal (sin idea_id, pieza huérfana)
-  //   otras col.   → no debería llamarse (no se renderiza el botón)
   function handleAddClick(colKey) {
     if (colKey === "ideas") {
       setNewIdeaOpen(true);
@@ -380,14 +332,11 @@ export default function Tablero() {
     }
   }
 
-  // Click en "Dar forma" sobre una card de idea → NuevaPiezaModal con la idea pre-vinculada.
   function handleDarFormaClick(idea, e) {
     if (e) e.stopPropagation();
     setNewPiezaContext({ ideaId: idea.id, ideaTitle: idea.titulo });
   }
 
-  // Callbacks de creación que los modales invocan en onCreate.
-  // Tras crear, hacemos un reload para evitar inconsistencias.
   async function handleCreateIdea(payload) {
     const nueva = await ideasApi.create(payload);
     setIdeas((arr) => [nueva, ...arr]);
@@ -398,7 +347,6 @@ export default function Tablero() {
     setPiezas((arr) => [nueva, ...arr]);
   }
 
-  // ─── Render ──────────────────────────────────────────────────
   return (
     <>
       <form className="cmdbar" onSubmit={handleCapture}>
@@ -444,7 +392,6 @@ export default function Tablero() {
       )}
 
       <div className="board">
-        {/* ═══ COL 01 · IDEAS ═══ */}
         <section className="kcol">
           <span className="br-tr"></span>
           <span className="br-bl"></span>
@@ -508,9 +455,6 @@ export default function Tablero() {
                     className={`kcard ${hasPiezas ? "" : "no-piezas"}`}
                     onClick={() => setSelected({ kind: "idea", data: idea })}
                   >
-                    {/* Acciones en hover (esquina superior derecha):
-                        ✎ editar → abre CardModal directamente en modo edición
-                        ✕ eliminar → confirm y delete */}
                     <div className="kcard-actions">
                       <button
                         className="kcard-act"
@@ -608,16 +552,12 @@ export default function Tablero() {
           </div>
         </section>
 
-        {/* ═══ COLS 02-05 · PIEZAS ═══ */}
         {CARRIL_PIEZAS.map((c) => {
           const pcol = piezasPorColumna(c.columna);
           const isOverHere = dragOver === c.columna;
           const colClass = `kcol${c.state ? ` ${c.state}` : ""}${isOverHere ? " kcol-dragover" : ""}`;
           const showFuture = c.columna === "agendado";
           const showPast   = c.columna === "publicado";
-          // Iluminamos la columna cuando se arrastra algo encima (inline
-          // porque la regla no existe en el CSS y queremos mantener los
-          // archivos de estilo byte-perfect con Claude Design).
           const dragOverStyle = isOverHere
             ? {
                 outline: "2px solid var(--acc)",
@@ -694,9 +634,6 @@ export default function Tablero() {
                         onDragStart={(e) => handleDragStart(e, p)}
                         onClick={() => setSelected({ kind: "pieza", data: p })}
                       >
-                        {/* Acciones en hover.
-                            📊 solo en email/relampago publicado — métricas manuales.
-                            ⚡ solo en email/relampago agendado — ID de Kit. */}
                         <div className="kcard-actions">
                           {c.columna === "publicado" && (p.formato === "email" || p.formato === "relampago") && (
                             <button
@@ -746,12 +683,10 @@ export default function Tablero() {
                         </span>
                         <div className="nm">{p.titulo || "(sin título)"}</div>
 
-                        {/* En desarrollo / Listo: subtítulo descriptivo (formato · plataforma) */}
                         {(c.columna === "desarrollo" || c.columna === "listo") && (
                           <div className="subnm">{subnmFor(p)}</div>
                         )}
 
-                        {/* Agendado: fecha futura con icono SVG (acento amber) */}
                         {showFuture && p.fecha_publicacion && (
                           <div className={`kdate ${isFuture(p.fecha_publicacion) ? "future" : "past"}`}>
                             <CalIcon />
@@ -759,7 +694,6 @@ export default function Tablero() {
                           </div>
                         )}
 
-                        {/* Publicado: fecha pasada sin icono (gris), sin hora */}
                         {showPast && p.fecha_publicacion && (
                           <div className="kdate past">
                             {formatKdate(p.fecha_publicacion, false)}
