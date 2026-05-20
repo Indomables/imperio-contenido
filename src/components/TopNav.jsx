@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import useClock from "../hooks/useClock.js";
+import SomaAudio from "../lib/soma-audio";
 
 export default function TopNav() {
   const { hms } = useClock();
@@ -121,9 +122,10 @@ export default function TopNav() {
         <button
           className="iconbtn tweaks"
           data-tip="Tweaks"
-          onClick={() =>
-            window.dispatchEvent(new CustomEvent("tweaks:toggle"))
-          }
+          onClick={() => {
+            SomaAudio.toggle();
+            window.dispatchEvent(new CustomEvent("tweaks:toggle"));
+          }}
         >
           <svg className="ico" viewBox="0 0 16 16">
             <path d="M2 4h12M2 8h12M2 12h12" />
