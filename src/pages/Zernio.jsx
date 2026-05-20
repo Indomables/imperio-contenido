@@ -1,6 +1,9 @@
 /**
  * Zernio — Pestaña de DMs de Instagram clasificados por IA.
  *
+ * v0.62: añadido handler de evento global "app:refresh" para que el
+ * botón Recargar del TopNav refresque también esta pestaña.
+ *
  * v0.61.0-α · Bloque C (backend real conectado)
  *
  * Hilo 2 cerrado. Los datos ahora vienen del endpoint
@@ -106,7 +109,6 @@ export default function Zernio() {
       setNotifsPending(pending);
       setNotifsDecided(decided);
       setHistoricoTotalCount(data.counts?.decided ?? decided.length);
-      // Si la selección actual ya no existe, elige la primera pending (o nada).
       setSelectedId((current) => {
         if (current && items.some((n) => n.id === current)) return current;
         return pending[0]?.id || null;
@@ -122,8 +124,17 @@ export default function Zernio() {
     refresh();
   }, [refresh]);
 
+  // Escuchar evento global "app:refresh" del botón Recargar del TopNav.
+  // Aquí la función local se llama `refresh` (no `reload` como en las
+  // otras pestañas) — el nombre del evento sigue siendo "app:refresh"
+  // porque es el contrato global del TopNav.
+  useEffect(() => {
+    const handler = () => refresh();
+    window.addEventListener("app:refresh", handler);
+    return () => window.removeEventListener("app:refresh", handler);
+  }, [refresh]);
+
   // ─── Edge health (placeholder hasta endpoint /health) ───────
-  // Si el último fetch falló, degradamos visualmente como señal.
   const edgeHealth = error ? EDGE_HEALTH_DEGRADED : EDGE_HEALTH_OPERATIONAL;
 
   // ─── Lista filtrada + sorted ────────────────────────────────
@@ -268,11 +279,6 @@ export default function Zernio() {
   }
 
   // ─── decide() con UI optimista + rollback ──────────────────
-  /**
-   *   notifId   = id de la notif pending
-   *   type      = 'enroll' | 'discard' | 'tag' | 'promote'
-   *   payload   = { sequenceSlug?, discardReason?, tagApplied? }
-   */
   async function decide(notifId, type, payload = {}) {
     const notif = notifsPending.find((n) => n.id === notifId);
     if (!notif) return;
@@ -292,7 +298,7 @@ export default function Zernio() {
       type,
       decidedAt: new Date(),
       decidedBy: "soma",
-      timeToDecideSec: 0, // se refina con la respuesta real
+      timeToDecideSec: 0,
       ...payload,
     };
     const decidedNotif = {
@@ -301,34 +307,28 @@ export default function Zernio() {
       decision: optimisticDecision,
     };
 
-    // Snapshot para rollback
     const prevPending = notifsPending;
     const prevDecided = notifsDecided;
     const prevTotalCount = historicoTotalCount;
     const prevSelectedId = selectedId;
 
-    // Optimistic update
     setNotifsPending((prev) => prev.filter((n) => n.id !== notifId));
     setNotifsDecided((prev) => [decidedNotif, ...prev]);
     setHistoricoTotalCount((c) => c + 1);
 
-    // Si la seleccionada era la afectada, mover a la siguiente pending
     if (selectedId === notifId) {
       const remaining = prevPending.filter((n) => n.id !== notifId);
       setSelectedId(remaining[0]?.id || null);
     }
 
-    // Toast optimista
     setToast({
       id: Date.now(),
       kind: type === "promote" ? "todo" : "success",
       message: buildToastMessage(notif, type, payload),
     });
 
-    // POST al backend
     try {
       const result = await decideNotification(notifId, type, payload);
-      // Refinar timeToDecideSec con el valor real del backend
       if (result?.timeToDecideSec != null) {
         setNotifsDecided((prev) =>
           prev.map((n) =>
@@ -349,7 +349,6 @@ export default function Zernio() {
         );
       }
     } catch (e) {
-      // Rollback completo
       setNotifsPending(prevPending);
       setNotifsDecided(prevDecided);
       setHistoricoTotalCount(prevTotalCount);
