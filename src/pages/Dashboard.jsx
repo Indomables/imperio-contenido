@@ -1,16 +1,15 @@
 /**
  * Dashboard — Cockpit operativo de Imperio Contenido.
  *
+ * v0.62: añadido handler de evento global "app:refresh" para que el
+ * botón Recargar del TopNav también refresque esta pestaña.
+ *
  * v0.46.0-α · Paridad pixel-perfect con la maqueta de Claude Design.
  *
  * 3 columnas, 8 paneles:
  *  · LEFT:   01 Operator · 02 En desarrollo
  *  · CENTER: 03 Sesión Hoy · 04 Pipeline Funnel · 05 Top piezas 90D
  *  · RIGHT:  06 Agendado · Mantra · 07 Atajos
- *
- * Datos reales (de la BD) en En desarrollo, Funnel, Top piezas, Agendado,
- * mini-KPIs de Sesión y contadores del statusbar. Operator, Mantra y Atajos
- * son contenido fijo. La cal-strip y el reloj se calculan en cliente.
  */
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
@@ -50,14 +49,12 @@ function greetingFor(date) {
   return "BUENAS NOCHES";
 }
 
-// "SÁB · 16 MAY · W20"
 function dateBadge(date) {
   const dow = date.toLocaleDateString("es-ES", { weekday: "short" })
                   .replace(/\.$/, "").toUpperCase();
   const day = date.getDate();
   const mon = date.toLocaleDateString("es-ES", { month: "short" })
                   .replace(/\.$/, "").toUpperCase();
-  // ISO week number (Date.prototype helper)
   const tmp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = tmp.getUTCDay() || 7;
   tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
@@ -66,7 +63,6 @@ function dateBadge(date) {
   return `${dow} · ${day} ${mon} · W${week}`;
 }
 
-// "MIÉ 17 · 18:00"
 function whenShort(iso) {
   const d = new Date(iso);
   const dow = d.toLocaleDateString("es-ES", { weekday: "short" })
@@ -77,7 +73,6 @@ function whenShort(iso) {
   return `${dow} ${day} · ${hh}:${mm}`;
 }
 
-// "EN 2D" / "EN 7D" / "HOY"
 function relativeDays(iso) {
   if (!iso) return "—";
   const now = new Date();
@@ -89,13 +84,11 @@ function relativeDays(iso) {
   return `EN ${diffDays}D`;
 }
 
-// Días desde una fecha pasada (para EDIT · ND en desarrollo)
 function daysAgo(iso) {
   if (!iso) return 0;
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000));
 }
 
-// "20 ABR 26 · 13:30 · 1199 enviados"
 function topSubtitle(pieza, datos) {
   const d = pieza.fecha_publicacion ? new Date(pieza.fecha_publicacion) : null;
   if (!d) return "—";
@@ -114,7 +107,6 @@ function fmtPct(n) { return n == null ? "—" : `${Number(n).toFixed(1)}%`; }
 
 // ─── Componentes reusables ─────────────────────────────────────
 
-/** Chasis estándar de panel: 2 corchetes + 4 tornillos + header. */
 function DPanel({ idx, title, meta, ledMeta, className = "", padBody, children }) {
   return (
     <section className={`dpanel ${className}`.trim()}>
@@ -155,14 +147,11 @@ export default function Dashboard() {
   const [metricas, setMetricas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
-  // Capture bar embebida (la global del Tablero sigue funcionando; aquí
-  // hay una segunda más rica con quick-tags)
   const [captureText, setCaptureText] = useState("");
   const [captureTag, setCaptureTag] = useState("idea");
   const [capturing, setCapturing] = useState(false);
   const captureRef = useRef(null);
 
-  // Tick por segundo (para reloj + cálculos de "EN ND")
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
@@ -187,6 +176,13 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Escuchar evento global "app:refresh" del botón Recargar del TopNav.
+  useEffect(() => {
+    const handler = () => reload();
+    window.addEventListener("app:refresh", handler);
+    return () => window.removeEventListener("app:refresh", handler);
+  }, [reload]);
 
   // ─── Derivados ───────────────────────────────────────────────
   const metricasMap = useMemo(() => {
@@ -220,7 +216,6 @@ export default function Dashboard() {
     [piezas],
   );
 
-  // Próxima salida (primera agendada con fecha futura)
   const proxima = useMemo(() => {
     const future = agendadas.filter((p) => {
       const d = p.fecha_publicacion ? new Date(p.fecha_publicacion) : null;
@@ -229,7 +224,6 @@ export default function Dashboard() {
     return future[0] || null;
   }, [agendadas, now]);
 
-  // Top 3 emails por % apertura en últimos 90 días
   const NINETY_DAYS_MS = 90 * 86400000;
   const topPiezas = useMemo(() => {
     const cutoff = now.getTime() - NINETY_DAYS_MS;
@@ -245,7 +239,6 @@ export default function Dashboard() {
       .slice(0, 3);
   }, [publicadas, metricasMap, now]);
 
-  // Media de % apertura del set para mostrar "▲ +X vs media"
   const aperturaMedia = useMemo(() => {
     const cutoff = now.getTime() - NINETY_DAYS_MS;
     const vals = publicadas
@@ -261,7 +254,6 @@ export default function Dashboard() {
     return vals.reduce((s, v) => s + v, 0) / vals.length;
   }, [publicadas, metricasMap, now]);
 
-  // Clic medio de los emails publicados en 90d (sin tracking aún → 0)
   const clicMedio = useMemo(() => {
     const cutoff = now.getTime() - NINETY_DAYS_MS;
     const vals = publicadas
@@ -277,7 +269,6 @@ export default function Dashboard() {
     return vals.reduce((s, v) => s + v, 0) / vals.length;
   }, [publicadas, metricasMap, now]);
 
-  // Revenue 90D (suma de revenue_eur en emails publicados 90d, si hay)
   const revenue90 = useMemo(() => {
     const cutoff = now.getTime() - NINETY_DAYS_MS;
     const vals = publicadas
@@ -292,7 +283,6 @@ export default function Dashboard() {
     return vals.reduce((s, v) => s + v, 0);
   }, [publicadas, metricasMap, now]);
 
-  // Suscriptores = max enviados de los emails (proxy del último tamaño de lista)
   const suscriptores = useMemo(() => {
     const vals = publicadas
       .filter((p) => p.formato === "email")
@@ -303,7 +293,6 @@ export default function Dashboard() {
     return Math.max(...vals);
   }, [publicadas, metricasMap]);
 
-  // Cal-strip: 7 días alrededor de hoy (3 antes, hoy, 3 después)
   const calStrip = useMemo(() => {
     const out = [];
     const base = new Date(now);
@@ -331,8 +320,6 @@ export default function Dashboard() {
   }, [now, agendadas]);
 
   // ─── StatusBar contextual ────────────────────────────────────
-  // Reportamos contadores reales (la maqueta los muestra como números).
-  // Mantenemos `left` como default (SCREEN_LABEL, OPERADOR, UPTIME).
   const pageStatus = useMemo(() => ({
     right: [
       { text: "IDEAS ",      strong: String(ideas.length) },
@@ -359,7 +346,6 @@ export default function Dashboard() {
     }
   }
 
-  // Status de cada pieza en desarrollo (cocinando/casi listo/listo)
   function statusOf(p) {
     if (p.columna === "listo") return { cls: "ready", label: "Listo", micro: `REVISADO · 0D` };
     const age = daysAgo(p.updated_at || p.created_at);
@@ -367,7 +353,6 @@ export default function Dashboard() {
     return { cls: "cooking", label: "Cocinando", micro: `EDIT · ${age}D` };
   }
 
-  // ────────────────────────────────────────────────────────────
   return (
     <div className="dash-main">
 
@@ -656,7 +641,6 @@ export default function Dashboard() {
               );
             })
           )}
-          {/* Sparkline decorativa (estática por ahora) */}
           <div className="spark">
             <svg viewBox="0 0 600 80" preserveAspectRatio="none">
               <defs>
