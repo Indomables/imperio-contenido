@@ -23,10 +23,75 @@
  *     Response: { ok: true, id, state, decidedAt, timeToDecideSec }
  *
  * Auth: protegida por site password de Netlify (igual que el resto del site).
+ *
+ * NOVEDAD (20 may 2026): cuando type='enroll', el endpoint ahora llama
+ * realmente a Zernio (POST /v1/sequences/{id}/enroll) usando el contact ID
+ * interno cacheado en metadata. Si la llamada falla, devuelve error 502 y
+ * registra la acción con resultado='error' SIN actualizar el estado de la
+ * notificación (queda en pendiente para reintento).
  */
 
 import type { Context, Config } from "@netlify/functions";
 import { db } from "../lib/db.js";
+
+// ─── Constantes Zernio ─────────────────────────────────────────────
+
+const ZERNIO_BASE = "https://zernio.com/api/v1";
+
+// Mapeo robusto: acepta tanto slugs cortos (frontend), largos (BD),
+// como con prefijo "int-" (interes_sugerido).
+const SEQUENCE_SLUG_TO_ID: Record<string, string> = {
+  // Slugs cortos del frontend
+  hermandad: "6a0afe4e47068aa92bb9c94a",
+  elite: "6a0afe52fcb4a493cb039914",
+  general: "6a0afe41fcb4a493cb039586",
+  // Slugs largos de la BD (sequence_sugerida_id)
+  "herm-onboarding": "6a0afe4e47068aa92bb9c94a",
+  "elite-call": "6a0afe52fcb4a493cb039914",
+  "general-welcome": "6a0afe41fcb4a493cb039586",
+  // Slugs con prefijo int- (interes_sugerido)
+  "int-hermandad": "6a0afe4e47068aa92bb9c94a",
+  "int-elite": "6a0afe52fcb4a493cb039914",
+  "int-general": "6a0afe41fcb4a493cb039586",
+};
+
+function resolveSequenceId(
+  slug: string | null | undefined,
+  fallback?: string | null,
+): string | null {
+  if (slug && SEQUENCE_SLUG_TO_ID[slug]) return SEQUENCE_SLUG_TO_ID[slug];
+  if (fallback && SEQUENCE_SLUG_TO_ID[fallback])
+    return SEQUENCE_SLUG_TO_ID[fallback];
+  return null;
+}
+
+async function enrollInZernio(
+  sequenceId: string,
+  contactIds: string[],
+  apiKey: string,
+): Promise<any> {
+  const res = await fetch(`${ZERNIO_BASE}/sequences/${sequenceId}/enroll`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ contactIds }),
+  });
+  const text = await res.text();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = text;
+  }
+  if (!res.ok) {
+    const detail =
+      typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+    throw new Error(`Zernio ${res.status}: ${detail}`);
+  }
+  return parsed;
+}
 
 // ─── Helpers de traducción SQL ↔ Frontend ──────────────────────────
 
@@ -80,8 +145,10 @@ function rowToFrontend(row: any): any {
   let state = STATE_SQL_TO_FRONT[row.estado] ?? "pending";
   // Sub-distinguir promoted vs tagged dentro de decidida_otro
   if (row.estado === "decidida_otro" && row.decision_motivo) {
-    if (String(row.decision_motivo).toLowerCase().includes("promote") ||
-        String(row.decision_motivo).toLowerCase().includes("reactor")) {
+    if (
+      String(row.decision_motivo).toLowerCase().includes("promote") ||
+      String(row.decision_motivo).toLowerCase().includes("reactor")
+    ) {
       state = "promoted";
     }
   }
@@ -100,7 +167,9 @@ function rowToFrontend(row: any): any {
       decidedBy: "soma",
       timeToDecideSec,
       sequenceSlug:
-        row.estado === "decidida_enrolar" ? row.sequence_sugerida_id : undefined,
+        row.estado === "decidida_enrolar"
+          ? row.sequence_sugerida_id
+          : undefined,
       discardReason:
         row.estado === "decidida_descartar" ? row.decision_motivo : undefined,
       tagApplied: state === "tagged" ? row.decision_motivo : undefined,
@@ -181,14 +250,6 @@ async function handleList(url: URL): Promise<Response> {
   const limitRaw = Number(url.searchParams.get("limit") ?? 50);
   const limit = Math.min(Math.max(1, Math.floor(limitRaw)), 200);
 
-  // Query única con join: notificaciones + clasificaciones + eventos
-  // Filtramos por estado según view.
-  let estadoFilter = "";
-  if (view === "inbox") estadoFilter = "WHERE n.estado = 'pendiente'";
-  else if (view === "historico") estadoFilter = "WHERE n.estado <> 'pendiente'";
-
-  // Drizzle ORM-style template no permite interpolar nombres de columnas/cláusulas
-  // arbitrariamente. Usamos branches con queries separadas para limpieza.
   let rows: any[];
   if (view === "inbox") {
     rows = await db.sql`
@@ -319,15 +380,22 @@ async function handleDecide(req: Request, notifId: string): Promise<Response> {
   const mapping = DECISION_TYPE_FRONT_TO_SQL[type];
   if (!mapping) return json({ error: "invalid_decision_type" }, 400);
 
-  // Verificar que la notif existe y está pendiente
+  // Verificar que la notif existe y está pendiente.
+  // Traemos también metadata, interes_sugerido y sequence_sugerida_id para
+  // poder llamar a Zernio en el caso enroll.
   const existing = await db.sql<{
     id: string;
     estado: string;
     clasificacion_id: string;
     created_at: Date;
     zernio_contact_id: string;
+    metadata: any;
+    interes_sugerido: string;
+    sequence_sugerida_id: string;
   }>`
-    SELECT n.id, n.estado, n.clasificacion_id, n.created_at, c.zernio_contact_id
+    SELECT
+      n.id, n.estado, n.clasificacion_id, n.created_at,
+      c.zernio_contact_id, c.metadata, c.interes_sugerido, c.sequence_sugerida_id
     FROM zernio_notificaciones n
     JOIN zernio_clasificaciones c ON c.id = n.clasificacion_id
     WHERE n.id = ${notifId}
@@ -340,14 +408,124 @@ async function handleDecide(req: Request, notifId: string): Promise<Response> {
     );
   }
 
+  const clasif = existing[0];
+  const metadata = clasif.metadata || {};
+  const contactIdInternal: string | null =
+    metadata.zernio_contact_id_internal ?? null;
+
   // Construir motivo legible para la decisión
   let motivo = "";
   if (type === "enroll") motivo = `enrolar:${body.sequenceSlug ?? ""}`;
   else if (type === "discard")
-    motivo = body.discardReason ? `descartar:${body.discardReason}` : "descartar";
-  else if (type === "tag")
-    motivo = `tag:${body.tagApplied ?? ""}`;
+    motivo = body.discardReason
+      ? `descartar:${body.discardReason}`
+      : "descartar";
+  else if (type === "tag") motivo = `tag:${body.tagApplied ?? ""}`;
   else if (type === "promote") motivo = "promote:reactor";
+
+  // ─── ENROLL REAL EN ZERNIO ───────────────────────────────────
+  // Si es type='enroll', llamamos a Zernio ANTES de actualizar la BD.
+  // Si falla, abortamos: dejamos la notif en pendiente y devolvemos error.
+  // De esa forma, un fallo de Zernio no marca la decisión como tomada y
+  // Soma puede reintentar desde la UI.
+
+  if (type === "enroll") {
+    const sequenceId = resolveSequenceId(
+      body.sequenceSlug,
+      clasif.sequence_sugerida_id || clasif.interes_sugerido,
+    );
+
+    if (!sequenceId) {
+      return json(
+        {
+          error: "no_sequence_match",
+          detail: `No hay sequence ID para slug='${body.sequenceSlug}' fallback='${clasif.sequence_sugerida_id || clasif.interes_sugerido}'`,
+        },
+        400,
+      );
+    }
+
+    if (!contactIdInternal) {
+      // Registrar acción con error claro
+      await db.sql`
+        INSERT INTO zernio_acciones (
+          notificacion_id, zernio_contact_id, tipo, detalles, resultado, motivo, error_msg, ejecutado_at
+        )
+        VALUES (
+          ${notifId},
+          ${existing[0].zernio_contact_id},
+          ${mapping.accionTipo},
+          ${JSON.stringify({ ...body, sequenceId })}::jsonb,
+          'error',
+          ${`enrolar:${body.sequenceSlug ?? ""} sequenceId=${sequenceId}`},
+          ${"sin zernio_contact_id_internal en metadata (clasificación pre-resolver)"},
+          now()
+        )
+      `;
+      return json(
+        {
+          error: "no_contact_id_internal",
+          detail:
+            "La clasificación no tiene zernio_contact_id_internal cacheado (probablemente es anterior al resolver). No se puede enrolar automáticamente: enrólalo a mano desde la UI de Zernio.",
+        },
+        400,
+      );
+    }
+
+    const apiKey = process.env.ZERNIO_API_KEY;
+    if (!apiKey) {
+      return json(
+        {
+          error: "no_zernio_api_key",
+          detail: "ZERNIO_API_KEY no configurada en el site imperio-contenido",
+        },
+        500,
+      );
+    }
+
+    try {
+      const result = await enrollInZernio(
+        sequenceId,
+        [contactIdInternal],
+        apiKey,
+      );
+      motivo += ` · sequenceId=${sequenceId} contactId=${contactIdInternal}`;
+      // result lo descartamos por ahora; en futuras versiones podríamos
+      // guardarlo en `detalles` para auditar.
+      void result;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // Registrar acción con error sin tocar el estado de la notif
+      await db.sql`
+        INSERT INTO zernio_acciones (
+          notificacion_id, zernio_contact_id, tipo, detalles, resultado, motivo, error_msg, ejecutado_at
+        )
+        VALUES (
+          ${notifId},
+          ${contactIdInternal},
+          ${mapping.accionTipo},
+          ${JSON.stringify({ ...body, sequenceId })}::jsonb,
+          'error',
+          ${`enrolar:${body.sequenceSlug ?? ""} sequenceId=${sequenceId}`},
+          ${errMsg},
+          now()
+        )
+      `;
+
+      return json(
+        {
+          error: "zernio_enroll_failed",
+          detail: errMsg,
+          sequenceId,
+          contactIdInternal,
+        },
+        502,
+      );
+    }
+  }
+
+  // ─── Si llegamos aquí: o no es enroll, o el enroll en Zernio fue OK ─
 
   // 1. Actualizar notificación
   await db.sql`
@@ -365,7 +543,7 @@ async function handleDecide(req: Request, notifId: string): Promise<Response> {
     )
     VALUES (
       ${notifId},
-      ${existing[0].zernio_contact_id},
+      ${contactIdInternal ?? existing[0].zernio_contact_id},
       ${mapping.accionTipo},
       ${JSON.stringify(body)}::jsonb,
       'ok',
