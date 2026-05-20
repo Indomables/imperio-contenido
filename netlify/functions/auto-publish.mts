@@ -1,38 +1,23 @@
 /**
  * auto-publish — Scheduled Function (cron horario).
  *
- * Port directo de la edge function `auto-publish` de Supabase (versión 23).
- * Ejecuta dos tareas en cada disparo:
+ * v0.62: ahora también guarda `links_clicks` (desglose por link) en cada
+ * refresh. La métrica agregada `clics` y `tasa_clics` siguen viniendo
+ * de /stats; el desglose por URL viene de /link_clicks.
+ *
+ * Tareas en cada disparo:
  *
  *  1. AGENDADAS → PUBLICADAS:
  *     Para cada pieza email con `columna='agendado'` y `kit_broadcast_id`
  *     no vacío, consulta Kit v4. Si el broadcast tiene `published_at`,
  *     mueve la pieza a `publicado`, actualiza `fecha_publicacion` y
- *     refresca métricas.
+ *     refresca métricas (incluido el desglose de clicks por link).
  *
  *  2. PUBLICADAS RECIENTES → REFRESH MÉTRICAS:
  *     Para cada pieza email con `columna='publicado'` publicada en las
- *     últimas 72h, refresca sus métricas desde Kit v4 stats.
+ *     últimas 72h, refresca sus métricas desde Kit v4 stats + link_clicks.
  *
- * Normalización de ID: en el legacy de Supabase, algunas piezas tenían
- * almacenado `publication_id` en lugar del `broadcast.id` real. Esta
- * función resuelve el ID correcto en el primer disparo donde lo encuentra
- * y persiste el valor real para que no haya que re-resolver nunca más.
- *
- * Schedule: `@hourly` (cada hora en punto).
- *
- * Configuración (env vars en Netlify):
- *   - KIT_API_KEY_V4   (requerida) — API key de Kit v4. Antes vivía en
- *                                    `settings.kit_api_key_v4` de Supabase.
- *   - CRON_SECRET      (opcional)  — si está definida, requiere
- *                                    `Authorization: Bearer <secret>` para
- *                                    invocaciones HTTP externas (manuales).
- *                                    El scheduler interno de Netlify no
- *                                    pasa este header — usa el path interno.
- *
- * Para disparar manualmente desde curl (testing):
- *   curl -X POST https://impero-contenido.netlify.app/.netlify/functions/auto-publish \
- *        -H "Authorization: Bearer $CRON_SECRET"
+ * Schedule: `@hourly`.
  */
 
 import type { Context, Config } from "@netlify/functions";
@@ -56,6 +41,20 @@ interface KitStats {
   unsubscribe_rate?: number | null;
 }
 
+interface KitLinkClick {
+  url: string;
+  unique_clicks: number;
+  click_to_delivery_rate?: number;
+  click_to_open_rate?: number;
+}
+
+interface LinkClickStored {
+  url: string;
+  unique_clicks: number;
+  click_to_delivery_rate: number | null;
+  click_to_open_rate: number | null;
+}
+
 interface Metricas {
   enviados:       number | null;
   aperturas:      number | null;
@@ -64,6 +63,7 @@ interface Metricas {
   tasa_clics:     number | null;
   bajas:          number | null;
   tasa_bajas:     number | null;
+  links_clicks?:  LinkClickStored[];
 }
 
 interface RunResult {
@@ -75,12 +75,9 @@ interface RunResult {
 }
 
 export default async (req: Request, _context: Context) => {
-  // 1. Auth (solo aplica si CRON_SECRET está definida y la llamada es HTTP externa)
   const cronSecret = Netlify.env.get("CRON_SECRET");
   if (cronSecret) {
     const auth = req.headers.get("authorization") || "";
-    // Las Scheduled invocadas por el scheduler interno de Netlify usan el
-    // header `x-netlify-event: schedule`. Si está, dejamos pasar.
     const isInternalSchedule = req.headers.get("x-netlify-event") === "schedule";
     const isAuthorized = auth === `Bearer ${cronSecret}`;
     if (!isInternalSchedule && !isAuthorized) {
@@ -88,7 +85,6 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
-  // 2. API key
   const v4Key = Netlify.env.get("KIT_API_KEY_V4");
   if (!v4Key) {
     return new Response(
@@ -100,7 +96,7 @@ export default async (req: Request, _context: Context) => {
 
   const result: RunResult = { moved: 0, updated: 0, normalized: 0, errors: [], debug: [] };
 
-  // 3. Cargar lista de broadcasts para resolver IDs
+  // Cargar lista de broadcasts para resolver IDs
   let broadcastsList: KitBroadcast[] = [];
   try {
     const r = await fetch(`${KIT_BASE}/broadcasts?per_page=100`, { headers });
@@ -111,7 +107,6 @@ export default async (req: Request, _context: Context) => {
     result.debug.push(`list err: ${(e as Error).message}`);
   }
 
-  // Resuelve un ID almacenado al broadcast.id real (manejo de publication_id legacy)
   const resolveId = (stored: string): { realId: string; wasResolved: boolean } => {
     if (broadcastsList.find((b) => String(b.id) === stored)) {
       return { realId: stored, wasResolved: false };
@@ -124,7 +119,7 @@ export default async (req: Request, _context: Context) => {
     return { realId: stored, wasResolved: false };
   };
 
-  // 4. Procesar agendadas → publicadas
+  // ── Procesar agendadas → publicadas ──────────────────────────
   const agendadas = await db.sql<{
     id: string;
     titulo: string | null;
@@ -174,7 +169,7 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
-  // 5. Refrescar métricas de publicadas recientes (72h)
+  // ── Refrescar métricas de publicadas recientes (72h) ─────────
   const cutoff = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
   const publicadas = await db.sql<{
     id: string;
@@ -213,9 +208,6 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
-  // Logueamos el resumen para que aparezca en los logs de Netlify
-  // (Netlify no loguea el body de la Response automáticamente, solo
-  // lo que pase por console.log).
   console.log(JSON.stringify({
     moved: result.moved,
     updated: result.updated,
@@ -231,9 +223,11 @@ export default async (req: Request, _context: Context) => {
 };
 
 /**
- * Refresca las métricas de una pieza desde Kit v4 stats endpoint.
- * Mantiene el resto de campos de `datos` (merge) por si hay tracking
- * manual añadido (replies, revenue_eur, etc.).
+ * Refresca las métricas de una pieza desde Kit v4:
+ *   - /stats (recipients, opens, clicks agregados, unsubs)
+ *   - /link_clicks (desglose por URL clickeada)
+ *
+ * Hace MERGE con los campos manuales existentes (replies, revenue_eur).
  */
 async function refreshStats(
   piezaId: string,
@@ -241,38 +235,71 @@ async function refreshStats(
   headers: Record<string, string>,
   result: RunResult,
 ): Promise<boolean> {
-  const r = await fetch(`${KIT_BASE}/broadcasts/${broadcastId}/stats`, { headers });
-  const text = await r.text();
-  if (!r.ok) {
-    result.errors.push(`stats ${broadcastId}: ${r.status} ${text.slice(0, 100)}`);
+  // 1. Stats agregados
+  const rStats = await fetch(`${KIT_BASE}/broadcasts/${broadcastId}/stats`, { headers });
+  const statsText = await rStats.text();
+  if (!rStats.ok) {
+    result.errors.push(`stats ${broadcastId}: ${rStats.status} ${statsText.slice(0, 100)}`);
     return false;
   }
 
-  let data: { broadcast?: { stats?: KitStats } };
+  let statsData: { broadcast?: { stats?: KitStats } };
   try {
-    data = JSON.parse(text);
+    statsData = JSON.parse(statsText);
   } catch {
     result.errors.push(`stats ${broadcastId}: JSON parse failed`);
     return false;
   }
-  const s = data.broadcast?.stats;
+  const s = statsData.broadcast?.stats;
   if (!s) {
     result.errors.push(`stats ${broadcastId}: no stats in response`);
     return false;
   }
 
+  // 2. Link clicks (desglose por URL). Tolerante a errores — si falla,
+  //    seguimos con los stats agregados.
+  let linksClicks: LinkClickStored[] | undefined;
+  try {
+    const rClicks = await fetch(
+      `${KIT_BASE}/broadcasts/${broadcastId}/link_clicks`,
+      { headers },
+    );
+    if (rClicks.ok) {
+      const j = (await rClicks.json()) as {
+        broadcast?: { clicks?: KitLinkClick[] };
+      };
+      const raw = j.broadcast?.clicks ?? [];
+      linksClicks = raw.map((c) => ({
+        url: c.url,
+        unique_clicks: c.unique_clicks ?? 0,
+        click_to_delivery_rate: c.click_to_delivery_rate ?? null,
+        click_to_open_rate: c.click_to_open_rate ?? null,
+      }));
+      result.debug.push(
+        `link_clicks ${broadcastId}: ${linksClicks.length} link${linksClicks.length === 1 ? "" : "s"}`,
+      );
+    } else {
+      result.debug.push(`link_clicks ${broadcastId}: ${rClicks.status} (ignored)`);
+    }
+  } catch (e) {
+    result.debug.push(`link_clicks ${broadcastId}: err ${(e as Error).message} (ignored)`);
+  }
+
   const metricas: Metricas = {
     enviados:      s.recipients ?? null,
     aperturas:     s.emails_opened ?? null,
-    tasa_apertura: s.open_rate != null      ? +Number(s.open_rate).toFixed(1)        : null,
+    tasa_apertura: s.open_rate != null        ? +Number(s.open_rate).toFixed(1)        : null,
     clics:         s.total_clicks ?? null,
-    tasa_clics:    s.click_rate != null     ? +Number(s.click_rate).toFixed(1)       : null,
+    tasa_clics:    s.click_rate != null       ? +Number(s.click_rate).toFixed(1)       : null,
     bajas:         s.unsubscribes ?? null,
     tasa_bajas:    s.unsubscribe_rate != null ? +Number(s.unsubscribe_rate).toFixed(2) : null,
+    ...(linksClicks !== undefined ? { links_clicks: linksClicks } : {}),
   };
-  result.debug.push(`stats ${broadcastId}: env=${metricas.enviados} ap=${metricas.aperturas} (${metricas.tasa_apertura}%)`);
+  result.debug.push(
+    `stats ${broadcastId}: env=${metricas.enviados} ap=${metricas.aperturas} (${metricas.tasa_apertura}%) cl=${metricas.clics}`,
+  );
 
-  // Upsert con merge de los campos existentes (replies, revenue_eur, etc.)
+  // 3. Upsert con merge de los campos existentes (replies, revenue_eur, etc.)
   const existing = await db.sql<{ id: string; datos: Record<string, unknown> }>`
     SELECT id, datos FROM metricas WHERE pieza_id = ${piezaId}
   `;
@@ -293,6 +320,5 @@ async function refreshStats(
 }
 
 export const config: Config = {
-  // Cada hora en punto. Coincide con la indicación "CRON CADA HORA" del UI.
   schedule: "@hourly",
 };
