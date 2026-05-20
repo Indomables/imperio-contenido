@@ -6,6 +6,14 @@
  * está alineado con la "Opción C" decidida: empezar con tool_use clásico
  * por simplicidad y migrar a MCP a futuro si conviene.
  *
+ * v0.64 · Fix temporal:
+ *   - El modelo no tiene noción de fecha actual y al pedirle "últimos N
+ *     días" mezclaba broadcasts de hace meses con fechas del año anterior
+ *     y los etiquetaba como recientes. Ahora inyectamos la fecha de hoy
+ *     (zona Europa/Madrid) en el system prompt y añadimos reglas
+ *     explícitas para que use sent_after/sent_before en filtros
+ *     temporales relativos.
+ *
  * Modelo: claude-sonnet-4-6 (sin extended thinking, baja latencia para
  * chat interactivo).
  *
@@ -50,9 +58,46 @@ const MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERATIONS = 8;
 const MAX_TOKENS = 2048;
 
-const SYSTEM_PROMPT = `Eres Claude actuando como copiloto operativo de Imperio Indomable, el negocio de Soma Alcázar. Estás embebido en la pestaña Análisis de su app interna y tienes acceso a herramientas que consultan la cuenta de Kit (su proveedor de email).
+// ─── System prompt builder ──────────────────────────────────────
+// Inyectamos la fecha actual en cada request porque el modelo no tiene
+// noción de "hoy" por sí solo. Zona horaria Europa/Madrid (donde está Soma).
+function buildSystemPrompt(): string {
+  const now = new Date();
+  // Formatear fecha en español, zona Madrid, para que el modelo la entienda
+  // claramente y para humanos también.
+  const fechaLarga = now.toLocaleDateString("es-ES", {
+    timeZone: "Europe/Madrid",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  // ISO YYYY-MM-DD para que el modelo pueda usarlo directo en sent_after/sent_before.
+  const isoMadrid = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now); // en-CA da YYYY-MM-DD
 
-CONTEXTO:
+  return `Eres Claude actuando como copiloto operativo de Imperio Indomable, el negocio de Soma Alcázar. Estás embebido en la pestaña Análisis de su app interna y tienes acceso a herramientas que consultan la cuenta de Kit (su proveedor de email).
+
+FECHA Y HORA ACTUAL:
+- Hoy es ${fechaLarga} (zona horaria Europa/Madrid).
+- Fecha ISO de hoy: ${isoMadrid}
+- Cuando el usuario diga "últimos N días", "este mes", "este trimestre", "esta semana", calcula la ventana relativa a ESTA fecha, nunca a una fecha anterior.
+
+REGLA CRÍTICA — FILTROS TEMPORALES:
+Cuando el usuario pida un análisis acotado en el tiempo (ej. "últimos 30 días", "este trimestre", "junio", "últimas 2 semanas"):
+- DEBES usar la tool \`get_broadcasts_stats\` pasando \`sent_after\` y opcionalmente \`sent_before\` en formato YYYY-MM-DD.
+- NUNCA uses \`list_broadcasts\` sin filtro y luego presentes los resultados como si correspondieran a una ventana temporal — eso devuelve los más recientes en general, que pueden ser de hace meses o años.
+- Si \`get_broadcasts_stats\` con esa ventana devuelve 0 broadcasts, dilo claramente al usuario en vez de inventar datos o ampliar la ventana sin avisar.
+- Ejemplos de cálculo (asumiendo hoy = ${isoMadrid}):
+  · "últimos 30 días" → sent_after = (hoy - 30 días) en formato YYYY-MM-DD
+  · "este mes" → sent_after = primer día del mes actual
+  · "junio" sin año → asume el junio más reciente que ya haya ocurrido
+
+CONTEXTO DEL NEGOCIO:
 - Newsletter de Soma: ~1.180 suscriptores activos
 - Envía 2 emails semanales: Backstage (lunes) y Autoridad (miércoles)
 - Open rates típicos 28-40%; click rates suelen ser 0% porque la mayoría de emails son texto puro sin CTAs
@@ -64,19 +109,21 @@ ESTILO DE RESPUESTA:
 - Si un dato no existe o no lo tienes, di que no lo tienes — no inventes nunca
 - Insight > volcado de datos. Si listas broadcasts, añade una línea de observación al final
 - Una respuesta no necesita usar todas las tools — usa solo las que aporten
+- En las tablas de broadcasts SIEMPRE incluye el año en la fecha (ej. "06 jun 2025") para evitar ambigüedad
 
 TOOLS DISPONIBLES:
-- list_broadcasts: lista los broadcasts (drafts, programados, enviados)
+- list_broadcasts: lista los broadcasts (drafts, programados, enviados). NO uses esta tool cuando el usuario pida una ventana temporal — usa get_broadcasts_stats con sent_after.
 - get_broadcast: detalle de un broadcast por ID
 - get_broadcast_stats: métricas (opens, clicks, unsubs) de un broadcast
 - get_broadcast_link_clicks: desglose de clicks por link de un broadcast
-- get_broadcasts_stats: stats cross-broadcast (útil para leaderboards y comparativas)
+- get_broadcasts_stats: stats cross-broadcast con filtro de fechas (sent_after, sent_before en YYYY-MM-DD). ESTA es la tool correcta para ventanas temporales.
 - list_tags: tags definidos en la cuenta
 - filter_subscribers: filtrar suscriptores por engagement (opens, clicks, fechas)
 - get_email_stats: stats agregadas de envío de la cuenta
 - get_growth_stats: crecimiento de la lista en el tiempo
 
 Si Soma te pide algo que requiere modificar datos (etiquetar, crear broadcasts, etc.), hazle saber que esta primera versión es read-only por seguridad y se ampliará pronto.`;
+}
 
 // ─── Definición de tools (formato Anthropic API) ────────────────
 
@@ -84,7 +131,7 @@ const TOOLS = [
   {
     name: "list_broadcasts",
     description:
-      "Lista los broadcasts (emails) de la cuenta de Kit, ordenados por fecha de creación descendente. Útil para ver los últimos enviados o pendientes. Por defecto devuelve 25.",
+      "Lista los broadcasts (emails) de la cuenta de Kit, ordenados por fecha de creación descendente. Útil para ver los últimos enviados o pendientes EN GENERAL, sin filtro temporal. Por defecto devuelve 25. IMPORTANTE: si el usuario pide una ventana temporal concreta (últimos N días, este mes, etc.), usa get_broadcasts_stats con sent_after en su lugar.",
     input_schema: {
       type: "object",
       properties: {
@@ -136,13 +183,13 @@ const TOOLS = [
   {
     name: "get_broadcasts_stats",
     description:
-      "Stats cross-broadcast: lista paginada con cada broadcast y sus stats en una sola llamada. Útil para leaderboards, comparativas y análisis temporal. Acepta filtro de fechas opcional (sent_after, sent_before en formato ISO YYYY-MM-DD).",
+      "Stats cross-broadcast: lista paginada con cada broadcast y sus stats en una sola llamada. Útil para leaderboards, comparativas y análisis temporal. ÚSALA para cualquier consulta con ventana temporal relativa (últimos N días, este mes, este trimestre): pasa sent_after y opcionalmente sent_before en formato ISO YYYY-MM-DD.",
     input_schema: {
       type: "object",
       properties: {
         per_page: { type: "integer", minimum: 1, maximum: 100 },
-        sent_after: { type: "string", description: "ISO date YYYY-MM-DD." },
-        sent_before: { type: "string", description: "ISO date YYYY-MM-DD." },
+        sent_after: { type: "string", description: "ISO date YYYY-MM-DD. Filtra broadcasts enviados después de esta fecha (inclusive)." },
+        sent_before: { type: "string", description: "ISO date YYYY-MM-DD. Filtra broadcasts enviados antes de esta fecha (inclusive)." },
       },
     },
   },
@@ -330,6 +377,7 @@ interface AnthropicResponse {
 async function callAnthropic(
   apiKey: string,
   messages: AnthropicMessage[],
+  systemPrompt: string,
 ): Promise<AnthropicResponse> {
   const r = await fetch(ANTHROPIC_API, {
     method: "POST",
@@ -341,7 +389,7 @@ async function callAnthropic(
     body: JSON.stringify({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: TOOLS,
       messages,
     }),
@@ -414,6 +462,10 @@ export default async (req: Request, _ctx: Context) => {
     content: m.content,
   }));
 
+  // Construir system prompt con la fecha actual inyectada — clave para que
+  // el modelo no se invente ventanas temporales (ver v0.64 changelog).
+  const systemPrompt = buildSystemPrompt();
+
   const events: ChatEvent[] = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -421,7 +473,7 @@ export default async (req: Request, _ctx: Context) => {
 
   // ── Tool loop ─────────────────────────────────────────────────
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-    const resp = await callAnthropic(anthropicKey, messages);
+    const resp = await callAnthropic(anthropicKey, messages, systemPrompt);
     totalInputTokens += resp.usage.input_tokens;
     totalOutputTokens += resp.usage.output_tokens;
     stopReason = resp.stop_reason;
