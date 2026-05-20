@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
+import SomaAudio from "../lib/soma-audio";
 
 const DEFAULT_TWEAKS = {
   motion: "live",
   density: "comfy",
   type: "default",
   accent: "amber",
-  audio: "on",
 };
 
 function applyTweaks(t) {
@@ -30,21 +30,32 @@ function applyTweaks(t) {
     "accent-ember"
   );
   if (t.accent !== "green") body.classList.add(`accent-${t.accent}`);
+}
 
-  body.classList.toggle("audio-on", t.audio === "on");
+function applyAudio(audioVal) {
+  // Sincroniza la clase del body por si el CSS la usa para algo
+  document.body.classList.toggle("audio-on", audioVal === "on");
 }
 
 export default function TweaksPanel() {
   const [open, setOpen] = useState(false);
   const [tweaks, setTweaks] = useState(DEFAULT_TWEAKS);
 
+  // El estado de audio es la fuente de verdad de SomaAudio (persiste en
+  // localStorage). Aquí solo lo reflejamos para la UI.
+  const [audio, setAudio] = useState(() =>
+    SomaAudio.isMuted() ? "off" : "on"
+  );
+
   useEffect(() => {
     applyTweaks(tweaks);
   }, [tweaks]);
 
+  useEffect(() => {
+    applyAudio(audio);
+  }, [audio]);
+
   // Listener del evento global para abrir/cerrar el panel desde el TopNav.
-  // El botón vive ahora en TopNav.jsx (clase "iconbtn tweaks") y dispara
-  // `window.dispatchEvent(new CustomEvent("tweaks:toggle"))`.
   useEffect(() => {
     function handleToggle() {
       setOpen((v) => !v);
@@ -53,7 +64,28 @@ export default function TweaksPanel() {
     return () => window.removeEventListener("tweaks:toggle", handleToggle);
   }, []);
 
-  const set = (key) => (val) => setTweaks((t) => ({ ...t, [key]: val }));
+  // Setter unificado: cualquier cambio en los tweaks emite el beep de "toggle".
+  // El cambio del audio se gestiona aparte porque también muta SomaAudio.
+  const set = (key) => (val) => {
+    if (tweaks[key] === val) return; // sin cambio, sin sonido
+    SomaAudio.toggle();
+    setTweaks((t) => ({ ...t, [key]: val }));
+  };
+
+  // Cambio del audio:
+  //   - "off" → suena confirmando antes de mute (último beep audible)
+  //   - "on"  → desmute primero, luego suena confirmando que está activo
+  const setAudioVal = (val) => {
+    if (audio === val) return;
+    if (val === "off") {
+      SomaAudio.toggle();
+      SomaAudio.setMuted(true);
+    } else {
+      SomaAudio.setMuted(false);
+      SomaAudio.toggle();
+    }
+    setAudio(val);
+  };
 
   const Btn = ({ active, onClick, children, style }) => (
     <button
@@ -151,16 +183,10 @@ export default function TweaksPanel() {
         <div className="tweak-section">
           <div className="lbl">Audio</div>
           <div className="tweak-row">
-            <Btn
-              active={tweaks.audio === "on"}
-              onClick={() => set("audio")("on")}
-            >
+            <Btn active={audio === "on"} onClick={() => setAudioVal("on")}>
               On
             </Btn>
-            <Btn
-              active={tweaks.audio === "off"}
-              onClick={() => set("audio")("off")}
-            >
+            <Btn active={audio === "off"} onClick={() => setAudioVal("off")}>
               Off
             </Btn>
           </div>
