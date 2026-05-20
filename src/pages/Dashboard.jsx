@@ -1,8 +1,22 @@
 /**
  * Dashboard — Cockpit operativo de Imperio Contenido.
  *
- * v0.62: añadido handler de evento global "app:refresh" para que el
- * botón Recargar del TopNav también refresque esta pestaña.
+ * v0.66 · Datos reales de Kit para el contador, gráfico y top piezas.
+ *   · El KPI "Suscriptores" ahora viene de Kit (total acumulado real).
+ *   · El sparkline inferior (caja 05) era un SVG hardcoded — ahora
+ *     dibuja la curva real de crecimiento de los últimos 30 días con
+ *     tooltip al hover (fecha + nº suscriptores).
+ *   · Altura del gráfico duplicada (de 80px a 160px) para que se vea
+ *     con más detalle vertical.
+ *   · Top piezas (caja 05) viene también de Kit (top 3 emails por
+ *     open rate en 90D), con la media calculada también desde Kit
+ *     para que el delta "vs media" sea coherente.
+ *   · Si el endpoint /api/dashboard-overview falla, fallback al
+ *     cálculo local de antes para que el Dashboard nunca aparezca
+ *     vacío.
+ *
+ * v0.62 · añadido handler de evento global "app:refresh" para que el
+ *   botón Recargar del TopNav también refresque esta pestaña.
  *
  * v0.46.0-α · Paridad pixel-perfect con la maqueta de Claude Design.
  *
@@ -89,7 +103,8 @@ function daysAgo(iso) {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000));
 }
 
-function topSubtitle(pieza, datos) {
+// Subtítulo para entradas de top piezas que vienen de la DB local (fallback)
+function topSubtitleLocal(pieza, datos) {
   const d = pieza.fecha_publicacion ? new Date(pieza.fecha_publicacion) : null;
   if (!d) return "—";
   const day = d.getDate();
@@ -102,8 +117,32 @@ function topSubtitle(pieza, datos) {
   return `${day} ${mon} ${yr} · ${hh}:${mm} · ${env}`;
 }
 
+// Subtítulo equivalente para entradas que vienen de Kit (caso normal)
+function topSubtitleKit(b) {
+  const d = b.send_at ? new Date(b.send_at) : null;
+  if (!d) return "—";
+  const day = d.getDate();
+  const mon = d.toLocaleDateString("es-ES", { month: "short" })
+                .replace(/\.$/, "").toUpperCase();
+  const yr  = String(d.getFullYear()).slice(-2);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const env = b.recipients != null ? `${b.recipients} enviados` : "—";
+  return `${day} ${mon} ${yr} · ${hh}:${mm} · ${env}`;
+}
+
 function pad2(n) { return String(n).padStart(2, "0"); }
 function fmtPct(n) { return n == null ? "—" : `${Number(n).toFixed(1)}%`; }
+
+// Formatea YYYY-MM-DD para el tooltip del gráfico: "DD MES"
+function fmtDateShort(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  const day = d.getDate();
+  const mon = d.toLocaleDateString("es-ES", { month: "short" })
+                .replace(/\.$/, "").toUpperCase();
+  return `${day} ${mon}`;
+}
 
 // ─── Componentes reusables ─────────────────────────────────────
 
@@ -138,6 +177,220 @@ function DPanel({ idx, title, meta, ledMeta, className = "", padBody, children }
   );
 }
 
+// ─── Gráfico de crecimiento (caja 05) ──────────────────────────
+// SVG con path real construido desde la serie de Kit. Tooltip al
+// hover muestra fecha y nº de suscriptores en ese punto.
+//
+// W/H son el viewBox del SVG (las coordenadas internas). El SVG se
+// estira a llenar el contenedor con preserveAspectRatio="none", así
+// que para el tooltip convertimos píxeles del DOM a coordenadas SVG
+// vía getBoundingClientRect.
+function GrowthSpark({ series }) {
+  const containerRef = useRef(null);
+  const [hover, setHover] = useState(null);
+
+  const W = 600;
+  const H = 160;        // <- altura doblada respecto a v0.65 (era 80)
+  const PAD_X = 6;
+  const PAD_Y = 12;
+
+  // Filtramos puntos válidos pero conservamos la posición temporal:
+  // si un día no tiene dato, no dibujamos punto pero la fecha queda
+  // en el eje X igual.
+  const points = useMemo(() => {
+    if (!series || series.length === 0) return [];
+    const valid = series.filter((p) => p.subscribers != null);
+    if (valid.length === 0) return [];
+
+    const min = Math.min(...valid.map((p) => p.subscribers));
+    const max = Math.max(...valid.map((p) => p.subscribers));
+    // Si todos los valores son iguales (lista estable), evitamos
+    // división por cero — pintamos una línea recta a media altura.
+    const range = Math.max(1, max - min);
+    const usableW = W - PAD_X * 2;
+    const usableH = H - PAD_Y * 2;
+
+    return series.map((p, i) => {
+      const x = PAD_X + (series.length === 1 ? usableW / 2 : (i / (series.length - 1)) * usableW);
+      const y = p.subscribers == null
+        ? null
+        : PAD_Y + (1 - (p.subscribers - min) / range) * usableH;
+      return { ...p, x, y };
+    });
+  }, [series]);
+
+  // Construir el path solo con puntos válidos consecutivos
+  const { pathD, areaD } = useMemo(() => {
+    if (points.length === 0) return { pathD: "", areaD: "" };
+    const validPts = points.filter((p) => p.y != null);
+    if (validPts.length === 0) return { pathD: "", areaD: "" };
+    const path = validPts
+      .map((pt, i) => (i === 0 ? "M" : "L") + ` ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`)
+      .join(" ");
+    const first = validPts[0];
+    const last = validPts[validPts.length - 1];
+    const area =
+      path +
+      ` L ${last.x.toFixed(1)} ${H} L ${first.x.toFixed(1)} ${H} Z`;
+    return { pathD: path, areaD: area };
+  }, [points]);
+
+  function handleMove(e) {
+    if (!containerRef.current || points.length === 0) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    // Convertir px del DOM a coordenada X del viewBox
+    const xPx = e.clientX - rect.left;
+    const xSvg = (xPx / rect.width) * W;
+    // Buscar el punto válido más cercano por X
+    let nearest = null;
+    let nd = Infinity;
+    for (const pt of points) {
+      if (pt.y == null) continue;
+      const dx = Math.abs(pt.x - xSvg);
+      if (dx < nd) {
+        nd = dx;
+        nearest = pt;
+      }
+    }
+    if (nearest) setHover(nearest);
+  }
+
+  function handleLeave() {
+    setHover(null);
+  }
+
+  const hasData = points.some((p) => p.y != null);
+
+  return (
+    <div
+      ref={containerRef}
+      className="spark"
+      style={{
+        position: "relative",
+        height: H,
+        cursor: hasData ? "crosshair" : "default",
+      }}
+      onMouseMove={hasData ? handleMove : undefined}
+      onMouseLeave={handleLeave}
+    >
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        style={{ width: "100%", height: "100%", display: "block" }}
+      >
+        <defs>
+          <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--acc)" stopOpacity="0.30" />
+            <stop offset="100%" stopColor="var(--acc)" stopOpacity="0" />
+          </linearGradient>
+          <pattern id="sparkGrid" width="60" height="40" patternUnits="userSpaceOnUse">
+            <path d="M60 0H0V40" fill="none" stroke="var(--line)" strokeWidth="0.5" />
+          </pattern>
+        </defs>
+        <rect width={W} height={H} fill="url(#sparkGrid)" />
+
+        {hasData && areaD && <path d={areaD} fill="url(#sparkFill)" />}
+        {hasData && pathD && (
+          <path d={pathD} fill="none" stroke="var(--acc)" strokeWidth="1.4" />
+        )}
+
+        {/* Línea vertical + punto destacado en hover */}
+        {hover && hover.y != null && (
+          <>
+            <line
+              x1={hover.x}
+              y1={0}
+              x2={hover.x}
+              y2={H}
+              stroke="var(--acc)"
+              strokeWidth="0.6"
+              strokeDasharray="3 3"
+              opacity="0.55"
+            />
+            <circle
+              cx={hover.x}
+              cy={hover.y}
+              r="4"
+              fill="var(--acc)"
+              stroke="var(--bg-1, #0a0a0a)"
+              strokeWidth="1.5"
+              vectorEffect="non-scaling-stroke"
+            />
+          </>
+        )}
+
+        {/* Mensaje "sin datos" si la serie está vacía */}
+        {!hasData && (
+          <text
+            x={W / 2}
+            y={H / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontFamily="var(--mono)"
+            fontSize="11"
+            letterSpacing="2"
+            fill="var(--ink-4)"
+          >
+            SIN DATOS DE CRECIMIENTO
+          </text>
+        )}
+      </svg>
+
+      {/* Tooltip absolutamente posicionado sobre el contenedor */}
+      {hover && hover.y != null && (
+        <div
+          style={{
+            position: "absolute",
+            left: `${(hover.x / W) * 100}%`,
+            top: 0,
+            transform: "translate(-50%, -110%)",
+            background: "var(--bg-1, #0a0a0a)",
+            border: "1px solid var(--acc)",
+            padding: "5px 9px",
+            fontFamily: "var(--mono)",
+            fontSize: 9,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "var(--ink-2, #ccc)",
+            whiteSpace: "nowrap",
+            zIndex: 10,
+            pointerEvents: "none",
+            minWidth: 90,
+            textAlign: "center",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+          }}
+        >
+          <div style={{ color: "var(--ink-4, #888)" }}>{fmtDateShort(hover.date)}</div>
+          <div style={{ marginTop: 2 }}>
+            <b style={{ color: "var(--acc)", fontSize: 11 }}>
+              {hover.subscribers.toLocaleString("es-ES")}
+            </b>
+            <span style={{ marginLeft: 4, color: "var(--ink-4, #888)" }}>SUBS</span>
+          </div>
+        </div>
+      )}
+
+      {/* Dot fijo en el "ahora" (último punto válido), siempre visible */}
+      {(() => {
+        const validPts = points.filter((p) => p.y != null);
+        if (validPts.length === 0) return null;
+        const last = validPts[validPts.length - 1];
+        return (
+          <span
+            className="now-dot"
+            style={{
+              position: "absolute",
+              left: `${(last.x / W) * 100}%`,
+              top: `${(last.y / H) * 100}%`,
+              transform: "translate(-50%, -50%)",
+            }}
+          />
+        );
+      })()}
+    </div>
+  );
+}
+
 // ─── Componente principal ──────────────────────────────────────
 
 export default function Dashboard() {
@@ -151,6 +404,12 @@ export default function Dashboard() {
   const [captureTag, setCaptureTag] = useState("idea");
   const [capturing, setCapturing] = useState(false);
   const captureRef = useRef(null);
+
+  // Datos en vivo desde Kit (vía /api/dashboard-overview).
+  // Null mientras carga o si falla — en ambos casos el resto del
+  // Dashboard cae al cálculo local de antes.
+  const [overview, setOverview] = useState(null);
+  const [overviewErr, setOverviewErr] = useState(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -175,14 +434,37 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Carga del overview de Kit. Independiente del reload de Supabase
+  // para que un fallo en Kit no rompa el resto del Dashboard.
+  const reloadOverview = useCallback(async () => {
+    try {
+      setOverviewErr(null);
+      const r = await fetch("/api/dashboard-overview");
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        throw new Error(`${r.status}: ${txt.slice(0, 120)}`);
+      }
+      const j = await r.json();
+      setOverview(j);
+    } catch (e) {
+      setOverviewErr(String(e.message || e));
+      // No limpiamos overview — si había datos previos, los conservamos
+    }
+  }, []);
+
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reloadOverview(); }, [reloadOverview]);
 
   // Escuchar evento global "app:refresh" del botón Recargar del TopNav.
+  // Refresca tanto Supabase como Kit overview.
   useEffect(() => {
-    const handler = () => reload();
+    const handler = () => {
+      reload();
+      reloadOverview();
+    };
     window.addEventListener("app:refresh", handler);
     return () => window.removeEventListener("app:refresh", handler);
-  }, [reload]);
+  }, [reload, reloadOverview]);
 
   // ─── Derivados ───────────────────────────────────────────────
   const metricasMap = useMemo(() => {
@@ -225,7 +507,14 @@ export default function Dashboard() {
   }, [agendadas, now]);
 
   const NINETY_DAYS_MS = 90 * 86400000;
-  const topPiezas = useMemo(() => {
+
+  // ─── Top piezas: PREFERIMOS Kit, fallback a cálculo local ───
+  // Si overview.topBroadcasts.items tiene contenido, lo usamos. Si no,
+  // calculamos desde piezas + metricas como hasta ahora.
+  const topPiezasKit = overview?.topBroadcasts?.items ?? null;
+  const aperturaMediaKit = overview?.topBroadcasts?.average_open_rate ?? null;
+
+  const topPiezasLocal = useMemo(() => {
     const cutoff = now.getTime() - NINETY_DAYS_MS;
     return publicadas
       .filter((p) =>
@@ -239,6 +528,9 @@ export default function Dashboard() {
       .slice(0, 3);
   }, [publicadas, metricasMap, now]);
 
+  // KPI: apertura media. Local (de piezas + metricas) — mantiene
+  // coherencia con la captura manual en la app. No mezclamos con Kit
+  // aquí para no tocar lo que no se pidió.
   const aperturaMedia = useMemo(() => {
     const cutoff = now.getTime() - NINETY_DAYS_MS;
     const vals = publicadas
@@ -283,7 +575,10 @@ export default function Dashboard() {
     return vals.reduce((s, v) => s + v, 0);
   }, [publicadas, metricasMap, now]);
 
-  const suscriptores = useMemo(() => {
+  // Suscriptores: PREFERIMOS el dato real de Kit; fallback al máximo de
+  // destinatarios de los emails publicados (lo que había antes).
+  const suscriptoresKit = overview?.subscribers?.current ?? null;
+  const suscriptoresLocal = useMemo(() => {
     const vals = publicadas
       .filter((p) => p.formato === "email")
       .map((p) => metricasMap.get(p.id)?.enviados)
@@ -292,6 +587,8 @@ export default function Dashboard() {
     if (vals.length === 0) return null;
     return Math.max(...vals);
   }, [publicadas, metricasMap]);
+  const suscriptores = suscriptoresKit ?? suscriptoresLocal;
+  const suscriptoresSource = suscriptoresKit != null ? "kit" : "local";
 
   const calStrip = useMemo(() => {
     const out = [];
@@ -556,7 +853,9 @@ export default function Dashboard() {
             <div className="dkpi">
               <span className="k">Suscriptores</span>
               <span className="v acc">{suscriptores == null ? "—" : suscriptores.toLocaleString("es-ES")}</span>
-              <span className="sub">desde lista</span>
+              <span className="sub">
+                {suscriptoresSource === "kit" ? "en vivo · Kit" : "desde lista"}
+              </span>
             </div>
           </div>
         </section>
@@ -600,21 +899,58 @@ export default function Dashboard() {
           </div>
         </DPanel>
 
-        {/* 05 / TOP PIEZAS · 90D */}
+        {/* 05 / TOP PIEZAS · 90D — Datos reales desde Kit con fallback local */}
         <DPanel
           idx="05"
           title="Top piezas · 90D"
           meta={<>ORDEN <b>% APERTURA</b></>}
           padBody={false}
         >
-          {topPiezas.length === 0 ? (
-            <div style={{ padding: "30px", textAlign: "center",
-              fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.22em",
-              textTransform: "uppercase", color: "var(--ink-4)" }}>
-              Sin emails publicados en 90D
-            </div>
-          ) : (
-            topPiezas.map((r, i) => {
+          {(() => {
+            const useKit = topPiezasKit && topPiezasKit.length > 0;
+            const mediaForDelta = useKit ? aperturaMediaKit : aperturaMedia;
+
+            if (useKit) {
+              return topPiezasKit.map((b, i) => {
+                const pct = Number(b.open_rate);
+                const delta = mediaForDelta != null ? (pct - mediaForDelta) : null;
+                const microColor = delta == null
+                  ? "var(--ink-4)"
+                  : delta >= 1   ? "var(--pos)"
+                  : delta <= -1  ? "oklch(0.72 0.205 30)"
+                  : "var(--ink-4)";
+                const microText = delta == null ? "—"
+                  : delta >= 1   ? `▲ +${delta.toFixed(1)} vs media`
+                  : delta <= -1  ? `▼ ${delta.toFixed(1)} vs media`
+                  : "≈ media";
+                return (
+                  <div key={`kit-${b.id}`} className="drow t-email">
+                    <span className="ix">{pad2(i + 1)}</span>
+                    <div className="bd">
+                      <div className="nm">{b.subject || "(sin asunto)"}</div>
+                      <div className="sub">{topSubtitleKit(b)}</div>
+                    </div>
+                    <div className="right">
+                      <span className="pct">{fmtPct(pct)}</span>
+                      <span className="micro" style={{ color: microColor }}>{microText}</span>
+                    </div>
+                  </div>
+                );
+              });
+            }
+
+            if (topPiezasLocal.length === 0) {
+              return (
+                <div style={{ padding: "30px", textAlign: "center",
+                  fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.22em",
+                  textTransform: "uppercase", color: "var(--ink-4)" }}>
+                  {overviewErr ? "Sin conexión con Kit" : "Sin emails publicados en 90D"}
+                </div>
+              );
+            }
+
+            // Fallback al cálculo local de antes
+            return topPiezasLocal.map((r, i) => {
               const pct = Number(r.datos.tasa_apertura);
               const delta = aperturaMedia != null ? (pct - aperturaMedia) : null;
               const microColor = delta == null
@@ -631,7 +967,7 @@ export default function Dashboard() {
                   <span className="ix">{pad2(i + 1)}</span>
                   <div className="bd">
                     <div className="nm">{r.pieza.titulo || "(sin título)"}</div>
-                    <div className="sub">{topSubtitle(r.pieza, r.datos)}</div>
+                    <div className="sub">{topSubtitleLocal(r.pieza, r.datos)}</div>
                   </div>
                   <div className="right">
                     <span className="pct">{fmtPct(pct)}</span>
@@ -639,31 +975,11 @@ export default function Dashboard() {
                   </div>
                 </div>
               );
-            })
-          )}
-          <div className="spark">
-            <svg viewBox="0 0 600 80" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor="var(--acc)" stopOpacity="0.30" />
-                  <stop offset="100%" stopColor="var(--acc)" stopOpacity="0" />
-                </linearGradient>
-                <pattern id="sparkGrid" width="60" height="20" patternUnits="userSpaceOnUse">
-                  <path d="M60 0H0V20" fill="none" stroke="var(--line)" strokeWidth="0.5" />
-                </pattern>
-              </defs>
-              <rect width="600" height="80" fill="url(#sparkGrid)" />
-              <path
-                d="M0 65 L40 60 L80 62 L120 50 L160 55 L200 42 L240 48 L280 35 L320 38 L360 26 L400 30 L440 22 L480 28 L520 18 L560 22 L600 12 L600 80 L0 80 Z"
-                fill="url(#sparkFill)"
-              />
-              <path
-                d="M0 65 L40 60 L80 62 L120 50 L160 55 L200 42 L240 48 L280 35 L320 38 L360 26 L400 30 L440 22 L480 28 L520 18 L560 22 L600 12"
-                fill="none" stroke="var(--acc)" strokeWidth="1.4"
-              />
-            </svg>
-            <span className="now-dot"></span>
-          </div>
+            });
+          })()}
+
+          {/* Gráfico real de crecimiento de suscriptores · 30D */}
+          <GrowthSpark series={overview?.subscribers?.series ?? []} />
         </DPanel>
 
       </div>
