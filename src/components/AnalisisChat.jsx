@@ -1,6 +1,10 @@
 /**
  * AnalisisChat — Chat IA embebido en la pestaña Análisis.
  *
+ * v0.64 · Fix temporal: el modelo no sabía la fecha actual y mezclaba
+ *   broadcasts de hace meses al pedirle "últimos N días". Fix vive en
+ *   chat.mts (system prompt con fecha + reglas de uso de sent_after).
+ *
  * v0.63 · Rediseño visual estilo Captura Global.
  *   · Eliminados los 5 ejemplos sugeridos y el texto introductorio.
  *   · Input rediseñado: input + botón ENVIAR rellenado en ámbar a la
