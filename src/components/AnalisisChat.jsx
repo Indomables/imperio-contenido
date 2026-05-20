@@ -1,6 +1,15 @@
 /**
  * AnalisisChat — Chat IA embebido en la pestaña Análisis.
  *
+ * v0.65 · Renderer markdown ligero integrado.
+ *   · Las respuestas del modelo ahora se parsean y renderizan como HTML
+ *     en vez de texto monoespaciado plano.
+ *   · Tablas markdown (| a | b |) se convierten en <table> reales con
+ *     columnas alineadas: texto a la izquierda, números/% a la derecha.
+ *   · Soporta **negritas**, *cursivas*, `código inline`, listas con -
+ *     y párrafos separados por línea en blanco.
+ *   · Parser inline (~80 líneas), sin dependencias externas.
+ *
  * v0.64 · Fix temporal: el modelo no sabía la fecha actual y mezclaba
  *   broadcasts de hace meses al pedirle "últimos N días". Fix vive en
  *   chat.mts (system prompt con fecha + reglas de uso de sent_after).
@@ -64,6 +73,310 @@ function formatEur(n) {
   return `${n.toFixed(2)} €`;
 }
 
+// ─── Markdown renderer ────────────────────────────────────────────
+// Parser minimal — solo lo que el modelo realmente usa en sus respuestas.
+// No es CommonMark completo, pero cubre tablas, negritas, cursivas,
+// código inline, listas y párrafos.
+//
+// Diseño:
+//   1. parseBlocks(text) → array de bloques: paragraph | table | list
+//   2. Cada bloque se renderiza como JSX
+//   3. El texto inline de cada bloque pasa por renderInline() que mapea
+//      **bold**, *italic*, `code` y enlaces a JSX
+//
+// Reactividad: el parser es síncrono y barato — no se cachea. Para los
+// volúmenes típicos del chat (texto de unas decenas de líneas) basta.
+
+// Detecta si una celda es numérica (solo dígitos, separadores, %, €, K, M, decimal)
+// → se usa para alinear columnas a la derecha
+function isNumericCell(s) {
+  const t = s.trim();
+  if (!t || t === "—" || t === "-") return false;
+  // permite cifras con separador de miles, decimales, %, €, K, M, signos
+  return /^[\-+]?\d[\d.,\s]*\s*([%€$KMkm])?$/.test(t);
+}
+
+// Renderiza el contenido inline de una línea: negritas, cursivas, código,
+// enlaces. Devuelve un array de nodos React.
+function renderInline(text, keyPrefix = "i") {
+  if (!text) return null;
+  const nodes = [];
+  let i = 0;
+  let buf = "";
+  let key = 0;
+
+  const flushBuf = () => {
+    if (buf) {
+      nodes.push(buf);
+      buf = "";
+    }
+  };
+
+  while (i < text.length) {
+    const c = text[i];
+    const c2 = text[i] + (text[i + 1] || "");
+
+    // Código inline `...`
+    if (c === "`") {
+      const end = text.indexOf("`", i + 1);
+      if (end > i) {
+        flushBuf();
+        nodes.push(
+          <code key={`${keyPrefix}-${key++}`} style={{
+            fontFamily: "var(--mono)",
+            fontSize: "0.92em",
+            background: "rgba(255,255,255,0.06)",
+            padding: "1px 5px",
+            borderRadius: 2,
+            color: "var(--ink-2, #ccc)",
+          }}>
+            {text.slice(i + 1, end)}
+          </code>
+        );
+        i = end + 1;
+        continue;
+      }
+    }
+
+    // Negritas **...**
+    if (c2 === "**") {
+      const end = text.indexOf("**", i + 2);
+      if (end > i + 1) {
+        flushBuf();
+        nodes.push(
+          <b key={`${keyPrefix}-${key++}`} style={{ color: "var(--ink, #fff)", fontWeight: 600 }}>
+            {renderInline(text.slice(i + 2, end), `${keyPrefix}-${key}`)}
+          </b>
+        );
+        i = end + 2;
+        continue;
+      }
+    }
+
+    // Cursivas *...* o _..._
+    // Evitamos comerse asteriscos sueltos que no abren ni cierran
+    if ((c === "*" || c === "_") && text[i + 1] !== c && text[i + 1] !== " ") {
+      const closeChar = c;
+      // buscar el cierre, sin confundir con doble asterisco
+      let end = -1;
+      for (let j = i + 1; j < text.length; j++) {
+        if (text[j] === closeChar && text[j - 1] !== " " && text[j + 1] !== closeChar) {
+          end = j;
+          break;
+        }
+      }
+      if (end > i) {
+        flushBuf();
+        nodes.push(
+          <i key={`${keyPrefix}-${key++}`} style={{ color: "var(--ink-2, #ccc)" }}>
+            {renderInline(text.slice(i + 1, end), `${keyPrefix}-${key}`)}
+          </i>
+        );
+        i = end + 1;
+        continue;
+      }
+    }
+
+    buf += c;
+    i++;
+  }
+  flushBuf();
+  return nodes;
+}
+
+// Parsea una tabla markdown a partir de un array de líneas (header, sep, ...rows)
+function parseTable(lines) {
+  // Cada línea es algo como "| col1 | col2 | col3 |"
+  const splitRow = (line) => {
+    // quitar | inicial y final si los hay
+    let t = line.trim();
+    if (t.startsWith("|")) t = t.slice(1);
+    if (t.endsWith("|"))   t = t.slice(0, -1);
+    return t.split("|").map((c) => c.trim());
+  };
+  const header = splitRow(lines[0]);
+  // lines[1] es el separador, lo ignoramos
+  const rows = lines.slice(2).map(splitRow);
+
+  // Detectar columnas numéricas: si en la mayoría de filas la celda es numérica,
+  // marcamos la columna como numérica (alinear a la derecha).
+  const numCols = header.length;
+  const aligns = [];
+  for (let c = 0; c < numCols; c++) {
+    let numCount = 0;
+    let nonEmptyCount = 0;
+    for (const row of rows) {
+      const cell = row[c] ?? "";
+      if (cell.trim()) {
+        nonEmptyCount++;
+        if (isNumericCell(cell)) numCount++;
+      }
+    }
+    aligns.push(
+      nonEmptyCount > 0 && numCount / nonEmptyCount >= 0.6 ? "right" : "left"
+    );
+  }
+  return { header, rows, aligns };
+}
+
+// Parsea el texto plano del modelo en bloques.
+function parseBlocks(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Salta líneas vacías sueltas
+    if (!line.trim()) { i++; continue; }
+
+    // ── Tabla markdown ─────────────────────────────────────────
+    // Requiere: línea actual con `|` Y siguiente línea = separador `|---|`
+    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?[\s\-:|]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("-")) {
+      const tableLines = [line, lines[i + 1]];
+      let j = i + 2;
+      while (j < lines.length && lines[j].includes("|") && lines[j].trim()) {
+        tableLines.push(lines[j]);
+        j++;
+      }
+      blocks.push({ kind: "table", ...parseTable(tableLines) });
+      i = j;
+      continue;
+    }
+
+    // ── Lista ─────────────────────────────────────────────────
+    if (/^\s*[-*·]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*·]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*·]\s+/, ""));
+        i++;
+      }
+      blocks.push({ kind: "list", items });
+      continue;
+    }
+
+    // ── Párrafo ───────────────────────────────────────────────
+    const paraLines = [line];
+    let k = i + 1;
+    while (k < lines.length && lines[k].trim() && !lines[k].includes("|") && !/^\s*[-*·]\s+/.test(lines[k])) {
+      paraLines.push(lines[k]);
+      k++;
+    }
+    blocks.push({ kind: "paragraph", text: paraLines.join(" ") });
+    i = k;
+  }
+  return blocks;
+}
+
+// Render del bloque ya parseado
+function MarkdownTable({ header, rows, aligns }) {
+  return (
+    <div style={{ overflowX: "auto", margin: "10px 0" }}>
+      <table style={{
+        width: "100%",
+        borderCollapse: "collapse",
+        fontSize: 12,
+        fontFamily: "var(--sans)",
+      }}>
+        <thead>
+          <tr>
+            {header.map((h, i) => (
+              <th key={i} style={{
+                textAlign: aligns[i],
+                padding: "6px 10px",
+                borderBottom: "1px solid var(--line, #2a2a2a)",
+                fontFamily: "var(--mono)",
+                fontSize: 9,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "var(--ink-3, #999)",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+              }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, r) => (
+            <tr key={r} style={{
+              borderBottom: "1px solid rgba(255,255,255,0.04)",
+            }}>
+              {header.map((_, c) => {
+                const cell = row[c] ?? "";
+                const isNum = aligns[c] === "right";
+                return (
+                  <td key={c} style={{
+                    textAlign: aligns[c],
+                    padding: "5px 10px",
+                    color: "var(--ink-2, #ddd)",
+                    fontFamily: isNum ? "var(--mono)" : "var(--sans)",
+                    fontVariantNumeric: isNum ? "tabular-nums" : undefined,
+                    whiteSpace: "nowrap",
+                  }}>
+                    {renderInline(cell, `td-${r}-${c}`)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Markdown({ source }) {
+  if (!source) return null;
+  const blocks = parseBlocks(source);
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.kind === "table") {
+          return <MarkdownTable key={i} {...b} />;
+        }
+        if (b.kind === "list") {
+          return (
+            <ul key={i} style={{
+              margin: "6px 0 6px 16px",
+              padding: 0,
+              listStyle: "none",
+            }}>
+              {b.items.map((it, j) => (
+                <li key={j} style={{
+                  margin: "3px 0",
+                  position: "relative",
+                  paddingLeft: 14,
+                  lineHeight: 1.5,
+                  color: "var(--ink, #fff)",
+                }}>
+                  <span style={{
+                    position: "absolute", left: 0, top: 0,
+                    color: "var(--acc, #c8a06b)",
+                  }}>›</span>
+                  {renderInline(it, `li-${i}-${j}`)}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        // paragraph
+        return (
+          <p key={i} style={{
+            margin: "6px 0",
+            lineHeight: 1.55,
+            color: "var(--ink, #fff)",
+          }}>
+            {renderInline(b.text, `p-${i}`)}
+          </p>
+        );
+      })}
+    </>
+  );
+}
+
 function ToolBlock({ event }) {
   // event.type === "tool_use" o "tool_result"
   const isUse = event.type === "tool_use";
@@ -107,7 +420,6 @@ function TextBlock({ content, role }) {
       padding: role === "user" ? "8px 12px" : "10px 0",
       background: role === "user" ? "rgba(255,255,255,0.04)" : "transparent",
       borderLeft: role === "user" ? "2px solid var(--acc, #c8a06b)" : "none",
-      whiteSpace: "pre-wrap",
       lineHeight: 1.5,
       color: "var(--ink, #fff)",
       fontSize: 13,
@@ -120,7 +432,10 @@ function TextBlock({ content, role }) {
           Soma
         </div>
       )}
-      {content}
+      {/* El usuario escribe en texto plano, sin markdown; el asistente sí. */}
+      {role === "user"
+        ? <span style={{ whiteSpace: "pre-wrap" }}>{content}</span>
+        : <Markdown source={content} />}
     </div>
   );
 }
