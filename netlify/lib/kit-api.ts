@@ -10,6 +10,11 @@
  * AI clients (claude.ai web, ChatGPT, Cursor) por el creador. Las
  * Functions backend siguen usando la API REST porque no hay AI client
  * en el loop — server-to-server con API key.
+ *
+ * v0.66 · `getGrowthStats` ahora acepta { starting, ending } opcionales
+ *   y devuelve el shape tipado KitGrowthStats con `subscribers` (total
+ *   acumulado al final del periodo). Útil para construir series
+ *   temporales: 1 llamada por día con `ending` distinto.
  */
 
 const KIT_BASE = "https://api.kit.com/v4";
@@ -152,10 +157,39 @@ export async function getEmailStats(apiKey: string): Promise<Record<string, unkn
   return (await r.json()) as Record<string, unknown>;
 }
 
-export async function getGrowthStats(apiKey: string): Promise<Record<string, unknown> | null> {
-  const r = await kitFetch(apiKey, `/account/growth_stats`);
+/**
+ * Stats de crecimiento de la cuenta.
+ *
+ * Sin parámetros: Kit devuelve el rango por defecto (últimos 90 días).
+ * Con `starting` y `ending` (YYYY-MM-DD): rango personalizado.
+ *
+ * Para construir una serie diaria, llamar N veces con `starting` fijo
+ * (muy antiguo) y `ending` variando día a día. Cada respuesta da el
+ * total acumulado de suscriptores a final de ese día.
+ */
+export interface KitGrowthStats {
+  cancellations?: number | null;
+  net_new_subscribers?: number | null;
+  new_subscribers?: number | null;
+  subscribers?: number | null;
+  starting?: string | null;
+  ending?: string | null;
+}
+
+export async function getGrowthStats(
+  apiKey: string,
+  opts: { starting?: string; ending?: string } = {},
+): Promise<KitGrowthStats | null> {
+  const qs = new URLSearchParams();
+  if (opts.starting) qs.set("starting", opts.starting);
+  if (opts.ending) qs.set("ending", opts.ending);
+  const path = qs.toString()
+    ? `/account/growth_stats?${qs.toString()}`
+    : `/account/growth_stats`;
+  const r = await kitFetch(apiKey, path);
   if (!r.ok) throw new Error(`getGrowthStats ${r.status}`);
-  return (await r.json()) as Record<string, unknown>;
+  const j = (await r.json()) as { stats?: KitGrowthStats };
+  return j.stats ?? null;
 }
 
 // ─── Tags ──────────────────────────────────────────────────────
