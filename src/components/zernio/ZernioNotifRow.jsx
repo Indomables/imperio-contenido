@@ -17,6 +17,8 @@
  *   - decided  → footer con zstate + meta de la decisión, botón Ver
  */
 
+import SomaAudio from "../../lib/soma-audio";
+
 const INTENT_LABEL = {
   hermandad: "Hermandad",
   elite:     "Élite",
@@ -55,6 +57,7 @@ export default function ZernioNotifRow({
   function handleClick(e) {
     // No queremos que el click en botones de acción dispare el select
     if (e.target.closest("button")) return;
+    SomaAudio.tap();
     onSelect?.(notif.id);
   }
 
@@ -87,33 +90,80 @@ export default function ZernioNotifRow({
       <div className="znotif-rt">
         <div className="znotif-actions">
           {isDecided ? (
-            <button type="button" onClick={() => onSelect?.(notif.id)}>
+            <button
+              type="button"
+              onClick={() => {
+                SomaAudio.tap();
+                onSelect?.(notif.id);
+              }}
+            >
               Ver
             </button>
           ) : isFamiliar ? (
             <>
-              <button type="button" onClick={(e) => { e.stopPropagation(); onTag?.(notif.id, "FAMILIAR"); }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  SomaAudio.send();
+                  onTag?.(notif.id, "FAMILIAR");
+                }}
+              >
                 Familiar
               </button>
-              <button type="button" onClick={() => onSelect?.(notif.id)}>
+              <button
+                type="button"
+                onClick={() => {
+                  SomaAudio.tap();
+                  onSelect?.(notif.id);
+                }}
+              >
                 Abrir
               </button>
             </>
           ) : notif.classification.intent === "sininter" ? (
             <>
-              <button type="button" className="danger" onClick={(e) => { e.stopPropagation(); onDiscard?.(notif.id); }}>
+              <button
+                type="button"
+                className="danger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  SomaAudio.send();
+                  onDiscard?.(notif.id);
+                }}
+              >
                 Descartar
               </button>
-              <button type="button" onClick={() => onSelect?.(notif.id)}>
+              <button
+                type="button"
+                onClick={() => {
+                  SomaAudio.tap();
+                  onSelect?.(notif.id);
+                }}
+              >
                 Abrir
               </button>
             </>
           ) : (
             <>
-              <button type="button" className="primary" onClick={(e) => { e.stopPropagation(); onEnroll?.(notif.id); }}>
+              <button
+                type="button"
+                className="primary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  SomaAudio.send();
+                  onEnroll?.(notif.id);
+                }}
+              >
                 Enrolar
               </button>
-              <button type="button" onClick={() => onSelect?.(notif.id)}>
+              <button
+                type="button"
+                onClick={() => {
+                  SomaAudio.tap();
+                  onSelect?.(notif.id);
+                }}
+              >
                 Abrir
               </button>
             </>
