@@ -1,34 +1,40 @@
 /**
  * Zernio — Pestaña de DMs de Instagram clasificados por IA.
  *
- * v0.60.0-α · Iteración 3 (acciones de decisión funcionales)
+ * v0.61.0-α · Bloque C (backend real conectado)
  *
- * Cierra el ciclo del frontend. Las acciones (enrolar / descartar / etiquetar /
- * promover) mutan el mock en vivo con UI optimista: la notif sale del Inbox y
- * entra en el Histórico con su estado correcto. Counters y filtros se actualizan
- * al instante.
+ * Hilo 2 cerrado. Los datos ahora vienen del endpoint
+ * `/api/zernio/notifications` (Netlify Function en el site principal), que
+ * lee la BD compartida con `imperio-zernio-hooks`. El mock (`zernio-mock.js`)
+ * queda fuera.
  *
- * Sin persistencia entre recargas (cada F5 resetea el mock al estado original).
- * El backend real (Hilo 2) hará la mutación persistente vía POST a la Netlify
- * Function correspondiente — la UI no cambia.
+ * Loading / error pintados por ZernioList vía el prop `state` (la
+ * infraestructura ya existía de Iteración 3; antes se forzaba con DEMO,
+ * ahora reflejan el estado real del fetch).
+ *
+ * Las decisiones son optimistas: la notif se mueve de pending a decided al
+ * instante y se hace POST a /decide en segundo plano. Si la API falla,
+ * rollback automático + toast de error.
+ *
+ * Pendiente futuro:
+ *   · Endpoint /api/zernio/health → edgeHealth real (de momento placeholder).
+ *   · Polling automático cada N seg (de momento refresh manual con el botón
+ *     "Reintentar" de ZernioList y el del banner de edge).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  NOTIFS_PENDING,
-  NOTIFS_DECIDED,
-  HISTORICO_TOTAL_COUNT,
+  listNotifications,
+  decideNotification,
   SEQUENCES,
   EDGE_HEALTH_OPERATIONAL,
   EDGE_HEALTH_DEGRADED,
-  EDGE_HEALTH_DOWN,
-} from "../lib/zernio-mock.js";
+} from "../lib/zernio-api.js";
 import ZernioToolbar from "../components/zernio/ZernioToolbar.jsx";
 import ZernioSidebar from "../components/zernio/ZernioSidebar.jsx";
 import ZernioList from "../components/zernio/ZernioList.jsx";
 import ZernioDetail from "../components/zernio/ZernioDetail.jsx";
 import ZernioEdgeBanner from "../components/zernio/ZernioEdgeBanner.jsx";
-import ZernioStateOverride from "../components/zernio/ZernioStateOverride.jsx";
 import ZernioToast from "../components/zernio/ZernioToast.jsx";
 import ZernioTagMenu from "../components/zernio/ZernioTagMenu.jsx";
 
@@ -36,14 +42,16 @@ const ALL_INTENTS = ["hermandad", "elite", "general", "sininter"];
 const ALL_TEMPERATURES = ["hot", "warm", "cold"];
 
 export default function Zernio() {
-  // ─── Mock en state mutable (Iteración 3) ────────────────────
-  const [notifsPending, setNotifsPending]   = useState(() => [...NOTIFS_PENDING]);
-  const [notifsDecided, setNotifsDecided]   = useState(() => [...NOTIFS_DECIDED]);
-  const [extraDecidedCount, setExtraDecidedCount] = useState(0); // cuántas decisiones se han añadido al histórico desde el mock inicial
+  // ─── Datos del backend ──────────────────────────────────────
+  const [notifsPending, setNotifsPending] = useState([]);
+  const [notifsDecided, setNotifsDecided] = useState([]);
+  const [historicoTotalCount, setHistoricoTotalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   // ─── State de UI ────────────────────────────────────────────
   const [view, setView] = useState("inbox");
-  const [selectedId, setSelectedId] = useState("n01");
+  const [selectedId, setSelectedId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
@@ -57,22 +65,28 @@ export default function Zernio() {
   const [sortHistorico, setSortHistorico] = useState("all");
 
   const [selectedSeq, setSelectedSeq] = useState(null);
-  const [forcedState, setForcedState] = useState("normal");
 
   // ─── Toast ──────────────────────────────────────────────────
   const [toast, setToast] = useState(null);
 
   // ─── Tag menu ───────────────────────────────────────────────
-  const [tagMenu, setTagMenu] = useState({ open: false, notifId: null, anchorRect: null });
+  const [tagMenu, setTagMenu] = useState({
+    open: false,
+    notifId: null,
+    anchorRect: null,
+  });
 
-  // ─── Side effects ───────────────────────────────────────────
+  // ─── Side effects de chrome ─────────────────────────────────
   useEffect(() => {
     document.body.classList.add("zernio-app");
     return () => document.body.classList.remove("zernio-app");
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(searchQuery.trim().toLowerCase()), 200);
+    const t = setTimeout(
+      () => setDebouncedQuery(searchQuery.trim().toLowerCase()),
+      200,
+    );
     return () => clearTimeout(t);
   }, [searchQuery]);
 
@@ -80,12 +94,37 @@ export default function Zernio() {
     setSelectedSeq(null);
   }, [selectedId]);
 
-  // ─── Edge health derivada ───────────────────────────────────
-  const edgeHealth = useMemo(() => {
-    if (forcedState === "warn") return EDGE_HEALTH_DEGRADED;
-    if (forcedState === "down") return EDGE_HEALTH_DOWN;
-    return EDGE_HEALTH_OPERATIONAL;
-  }, [forcedState]);
+  // ─── Fetch desde el backend ─────────────────────────────────
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await listNotifications({ view: "all", limit: 200 });
+      const items = data.items || [];
+      const pending = items.filter((n) => n.state === "pending");
+      const decided = items.filter((n) => n.state !== "pending");
+      setNotifsPending(pending);
+      setNotifsDecided(decided);
+      setHistoricoTotalCount(data.counts?.decided ?? decided.length);
+      // Si la selección actual ya no existe, elige la primera pending (o nada).
+      setSelectedId((current) => {
+        if (current && items.some((n) => n.id === current)) return current;
+        return pending[0]?.id || null;
+      });
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // ─── Edge health (placeholder hasta endpoint /health) ───────
+  // Si el último fetch falló, degradamos visualmente como señal.
+  const edgeHealth = error ? EDGE_HEALTH_DEGRADED : EDGE_HEALTH_OPERATIONAL;
 
   // ─── Lista filtrada + sorted ────────────────────────────────
   const sourceList = view === "inbox" ? notifsPending : notifsDecided;
@@ -97,7 +136,7 @@ export default function Zernio() {
       list = list.filter(
         (n) =>
           n.contact.handle.toLowerCase().includes(debouncedQuery) ||
-          n.dm.text.toLowerCase().includes(debouncedQuery)
+          n.dm.text.toLowerCase().includes(debouncedQuery),
       );
     }
 
@@ -116,7 +155,10 @@ export default function Zernio() {
         if (sortInbox === "recent") return b.receivedAt - a.receivedAt;
         if (sortInbox === "hottest") {
           const order = { hot: 0, warm: 1, cold: 2 };
-          return order[a.classification.temperature] - order[b.classification.temperature];
+          return (
+            order[a.classification.temperature] -
+            order[b.classification.temperature]
+          );
         }
         if (sortInbox === "confidence") {
           return b.classification.confidence - a.classification.confidence;
@@ -124,15 +166,16 @@ export default function Zernio() {
         return 0;
       });
     } else {
-      list = [...list].sort((a, b) => {
-        const ta = a.decision?.decidedAt?.getTime?.() || a.receivedAt.getTime();
-        const tb = b.decision?.decidedAt?.getTime?.() || b.receivedAt.getTime();
-        return tb - ta;
-      });
+      list = [...list].sort((a, b) => b.receivedAt - a.receivedAt);
 
-      if (sortHistorico === "enrolled") list = list.filter((n) => n.state === "enrolled");
-      else if (sortHistorico === "discarded") list = list.filter((n) => n.state === "discarded");
-      else if (sortHistorico === "other") list = list.filter((n) => n.state === "tagged" || n.state === "promoted");
+      if (sortHistorico === "enrolled")
+        list = list.filter((n) => n.state === "enrolled");
+      else if (sortHistorico === "discarded")
+        list = list.filter((n) => n.state === "discarded");
+      else if (sortHistorico === "other")
+        list = list.filter(
+          (n) => n.state === "tagged" || n.state === "promoted",
+        );
       else if (sortHistorico === "7d") {
         const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
         list = list.filter((n) => n.receivedAt.getTime() >= sevenDaysAgo);
@@ -142,35 +185,44 @@ export default function Zernio() {
     return list;
   }, [view, sourceList, debouncedQuery, filters, sortInbox, sortHistorico]);
 
-  // ─── Counters derivados (recalculan al mutar el mock) ───────
+  // ─── Counters derivados ─────────────────────────────────────
   const counters = useMemo(() => {
     const pendingByIntent = {};
     const pendingByTemp = {};
     let pendingCount = 0;
     for (const n of notifsPending) {
-      pendingByIntent[n.classification.intent] = (pendingByIntent[n.classification.intent] || 0) + 1;
-      pendingByTemp[n.classification.temperature] = (pendingByTemp[n.classification.temperature] || 0) + 1;
+      pendingByIntent[n.classification.intent] =
+        (pendingByIntent[n.classification.intent] || 0) + 1;
+      pendingByTemp[n.classification.temperature] =
+        (pendingByTemp[n.classification.temperature] || 0) + 1;
       pendingCount++;
     }
-    const decidedToday = notifsDecided.filter((n) =>
-      sameDay(n.decision?.decidedAt, new Date())
-    ).length;
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const decidedWeek = notifsDecided.filter(
-      (n) => n.decision?.decidedAt?.getTime?.() >= sevenDaysAgo
-    ).length;
-    const enrolmentRate = notifsDecided.length
-      ? Math.round(
-          (notifsDecided.filter((n) => n.state === "enrolled").length /
-            notifsDecided.length) *
-            100
-        )
-      : 0;
-    return { pendingCount, pendingByIntent, pendingByTemp, decidedToday, decidedWeek, enrolmentRate };
+    return {
+      pendingCount,
+      pendingByIntent,
+      pendingByTemp,
+      decidedToday: notifsDecided.filter((n) =>
+        sameDay(n.decision?.decidedAt, new Date()),
+      ).length,
+      decidedWeek: notifsDecided.filter((n) => {
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const t = n.decision?.decidedAt?.getTime?.() ?? 0;
+        return t >= sevenDaysAgo;
+      }).length,
+      enrolmentRate:
+        notifsDecided.length > 0
+          ? Math.round(
+              (notifsDecided.filter((n) => n.state === "enrolled").length /
+                notifsDecided.length) *
+                100,
+            )
+          : 0,
+    };
   }, [notifsPending, notifsDecided]);
 
-  // ─── Notif seleccionada (objeto completo) ───────────────────
+  // ─── Notif seleccionada ─────────────────────────────────────
   const selectedNotif = useMemo(() => {
+    if (!selectedId) return null;
     return (
       notifsPending.find((n) => n.id === selectedId) ||
       notifsDecided.find((n) => n.id === selectedId) ||
@@ -178,14 +230,14 @@ export default function Zernio() {
     );
   }, [selectedId, notifsPending, notifsDecided]);
 
-  // ─── Estado de la lista (cuando notifsPending queda vacía,
-  //     Inbox Zero aparece solo en la vista Inbox sin necesidad
-  //     de forzar nada — gracias a ZernioList) ──────────────────
-  const listState =
-    forcedState === "loading" ? "loading" :
-    forcedState === "error"   ? "error" :
-    forcedState === "zero"    ? "zero" :
-    "normal";
+  // ─── Estado de la lista ─────────────────────────────────────
+  const listState = loading
+    ? "loading"
+    : error
+      ? "error"
+      : sourceList.length === 0
+        ? "zero"
+        : "normal";
 
   // ─── Handlers de filtros ────────────────────────────────────
   function toggleIntent(intent) {
@@ -215,54 +267,106 @@ export default function Zernio() {
     });
   }
 
-  // ─── Mutación: decidir una notif ────────────────────────────
+  // ─── decide() con UI optimista + rollback ──────────────────
   /**
-   * decide(notifId, type, payload) — mueve la notif de pending a decided.
-   *
+   *   notifId   = id de la notif pending
    *   type      = 'enroll' | 'discard' | 'tag' | 'promote'
-   *   payload   = { sequenceSlug? , discardReason?, tagApplied? }
+   *   payload   = { sequenceSlug?, discardReason?, tagApplied? }
    */
-  function decide(notifId, type, payload = {}) {
+  async function decide(notifId, type, payload = {}) {
     const notif = notifsPending.find((n) => n.id === notifId);
     if (!notif) return;
 
     const newState =
-      type === "enroll"  ? "enrolled" :
-      type === "discard" ? "discarded" :
-      type === "tag"     ? "tagged" :
-      type === "promote" ? "promoted" :
-      "tagged";
+      type === "enroll"
+        ? "enrolled"
+        : type === "discard"
+          ? "discarded"
+          : type === "tag"
+            ? "tagged"
+            : type === "promote"
+              ? "promoted"
+              : "tagged";
 
-    const decision = {
+    const optimisticDecision = {
       type,
       decidedAt: new Date(),
       decidedBy: "soma",
-      timeToDecideSec: 4 + Math.floor(Math.random() * 17), // mock realista 4-20s
+      timeToDecideSec: 0, // se refina con la respuesta real
       ...payload,
     };
+    const decidedNotif = {
+      ...notif,
+      state: newState,
+      decision: optimisticDecision,
+    };
 
-    const decidedNotif = { ...notif, state: newState, decision };
+    // Snapshot para rollback
+    const prevPending = notifsPending;
+    const prevDecided = notifsDecided;
+    const prevTotalCount = historicoTotalCount;
+    const prevSelectedId = selectedId;
 
-    // Optimistic: pull del pending, push al decided
+    // Optimistic update
     setNotifsPending((prev) => prev.filter((n) => n.id !== notifId));
     setNotifsDecided((prev) => [decidedNotif, ...prev]);
-    setExtraDecidedCount((c) => c + 1);
+    setHistoricoTotalCount((c) => c + 1);
 
-    // Seleccionar la siguiente notif pending (si hay), para que el detail no quede vacío
-    const remaining = notifsPending.filter((n) => n.id !== notifId);
+    // Si la seleccionada era la afectada, mover a la siguiente pending
     if (selectedId === notifId) {
+      const remaining = prevPending.filter((n) => n.id !== notifId);
       setSelectedId(remaining[0]?.id || null);
     }
 
-    // Toast
-    const msg = buildToastMessage(notif, type, payload);
-    setToast({ id: Date.now(), kind: type === "promote" ? "todo" : "success", message: msg });
+    // Toast optimista
+    setToast({
+      id: Date.now(),
+      kind: type === "promote" ? "todo" : "success",
+      message: buildToastMessage(notif, type, payload),
+    });
+
+    // POST al backend
+    try {
+      const result = await decideNotification(notifId, type, payload);
+      // Refinar timeToDecideSec con el valor real del backend
+      if (result?.timeToDecideSec != null) {
+        setNotifsDecided((prev) =>
+          prev.map((n) =>
+            n.id === notifId
+              ? {
+                  ...n,
+                  decision: {
+                    ...n.decision,
+                    timeToDecideSec: result.timeToDecideSec,
+                    decidedAt:
+                      result.decidedAt instanceof Date
+                        ? result.decidedAt
+                        : new Date(result.decidedAt),
+                  },
+                }
+              : n,
+          ),
+        );
+      }
+    } catch (e) {
+      // Rollback completo
+      setNotifsPending(prevPending);
+      setNotifsDecided(prevDecided);
+      setHistoricoTotalCount(prevTotalCount);
+      setSelectedId(prevSelectedId);
+      setToast({
+        id: Date.now(),
+        kind: "error",
+        message: `Error · ${e?.message || "no se pudo registrar la decisión"}`,
+      });
+    }
   }
 
   function buildToastMessage(notif, type, payload) {
     const handle = notif.contact.handle;
     if (type === "enroll") {
-      const seqSlug = payload.sequenceSlug || notif.classification.suggestedSequence;
+      const seqSlug =
+        payload.sequenceSlug || notif.classification.suggestedSequence;
       const seqName = SEQUENCES[seqSlug]?.name || seqSlug;
       return `Enrolada · <b>${handle}</b> → ${seqName}`;
     }
@@ -283,7 +387,9 @@ export default function Zernio() {
   function handleEnrollFromRow(notifId) {
     const notif = notifsPending.find((n) => n.id === notifId);
     if (!notif) return;
-    decide(notifId, "enroll", { sequenceSlug: notif.classification.suggestedSequence });
+    decide(notifId, "enroll", {
+      sequenceSlug: notif.classification.suggestedSequence,
+    });
   }
   function handleDiscardFromRow(notifId) {
     decide(notifId, "discard");
@@ -293,7 +399,8 @@ export default function Zernio() {
   }
   function handleEnrollFromDetail() {
     if (!selectedNotif) return;
-    const sequenceSlug = selectedSeq || selectedNotif.classification.suggestedSequence;
+    const sequenceSlug =
+      selectedSeq || selectedNotif.classification.suggestedSequence;
     decide(selectedNotif.id, "enroll", { sequenceSlug });
   }
   function handleDiscardFromDetail() {
@@ -309,28 +416,37 @@ export default function Zernio() {
   const openTagMenuFromDetail = (anchorEl) => {
     if (!selectedNotif) return;
     const rect = anchorEl?.getBoundingClientRect?.();
-    setTagMenu({ open: true, notifId: selectedNotif.id, anchorRect: rect || null });
+    setTagMenu({
+      open: true,
+      notifId: selectedNotif.id,
+      anchorRect: rect || null,
+    });
   };
-  const closeTagMenu = () => setTagMenu({ open: false, notifId: null, anchorRect: null });
+  const closeTagMenu = () =>
+    setTagMenu({ open: false, notifId: null, anchorRect: null });
   const pickTag = (tag) => {
-    if (tagMenu.notifId) decide(tagMenu.notifId, "tag", { tagApplied: tag.label.toUpperCase() });
+    if (tagMenu.notifId)
+      decide(tagMenu.notifId, "tag", { tagApplied: tag.label.toUpperCase() });
   };
 
   return (
     <>
       <ZernioEdgeBanner
         health={edgeHealth}
-        onViewLogs={() => setToast({ id: Date.now(), kind: "todo", message: "<b>Ver logs</b> · TODO en backend real" })}
-        onRetry={() => {
-          setForcedState("normal");
-          setToast({ id: Date.now(), kind: "info", message: "Edge function · estado restaurado" });
-        }}
+        onViewLogs={() =>
+          setToast({
+            id: Date.now(),
+            kind: "todo",
+            message: "<b>Ver logs</b> · TODO en backend real",
+          })
+        }
+        onRetry={refresh}
       />
 
       <ZernioToolbar
         view={view}
         pendingCount={counters.pendingCount}
-        historicoCount={HISTORICO_TOTAL_COUNT + extraDecidedCount}
+        historicoCount={historicoTotalCount}
         onViewChange={setView}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -357,9 +473,11 @@ export default function Zernio() {
           onDiscard={handleDiscardFromRow}
           onTag={handleTagFromRow}
           onSortChange={view === "inbox" ? setSortInbox : setSortHistorico}
-          onRetry={() => setForcedState("normal")}
+          onRetry={refresh}
           state={listState}
-          totalCount={view === "inbox" ? counters.pendingCount : HISTORICO_TOTAL_COUNT + extraDecidedCount}
+          totalCount={
+            view === "inbox" ? counters.pendingCount : historicoTotalCount
+          }
         />
 
         <ZernioDetail
@@ -374,7 +492,6 @@ export default function Zernio() {
         />
       </div>
 
-      <ZernioStateOverride value={forcedState} onChange={setForcedState} />
       <ZernioToast toast={toast} onDismiss={() => setToast(null)} />
       <ZernioTagMenu
         open={tagMenu.open}
