@@ -24,6 +24,8 @@
  *   onPromote     — () => void
  */
 
+import SomaAudio from "../../lib/soma-audio";
+
 const INTENT_LABEL = {
   hermandad: "Hermandad",
   elite:     "Élite",
@@ -223,7 +225,14 @@ export default function ZernioDetail({
             <div className="lbl">Decisión</div>
 
             {currentSeq && (
-              <button type="button" className="zd-primary" onClick={onEnroll}>
+              <button
+                type="button"
+                className="zd-primary"
+                onClick={() => {
+                  SomaAudio.send();
+                  onEnroll?.();
+                }}
+              >
                 <span>Enrolar en</span>
                 <span className="seq-name">{currentSeq.name}</span>
                 <span className="arr">→</span>
@@ -242,7 +251,10 @@ export default function ZernioDetail({
                     key={opt.id}
                     type="button"
                     className={`seq${currentSeqSlug === seqSlug ? " on" : ""}`}
-                    onClick={() => onSeqChange?.(seqSlug)}
+                    onClick={() => {
+                      SomaAudio.toggle();
+                      onSeqChange?.(seqSlug);
+                    }}
                   >
                     {opt.label}
                   </button>
@@ -251,17 +263,34 @@ export default function ZernioDetail({
             </div>
 
             <div className="zd-grid">
-              <button type="button" className="zd-btn danger" onClick={onDiscard}>
+              <button
+                type="button"
+                className="zd-btn danger"
+                onClick={() => {
+                  SomaAudio.send();
+                  onDiscard?.();
+                }}
+              >
                 Descartar
               </button>
               <button
                 type="button"
                 className="zd-btn"
-                onClick={(e) => onTag?.(e.currentTarget)}
+                onClick={(e) => {
+                  SomaAudio.tap();
+                  onTag?.(e.currentTarget);
+                }}
               >
                 Etiquetar como…
               </button>
-              <button type="button" className="zd-btn advanced" onClick={onPromote}>
+              <button
+                type="button"
+                className="zd-btn advanced"
+                onClick={() => {
+                  SomaAudio.send();
+                  onPromote?.();
+                }}
+              >
                 ↗ Promover al Reactor
               </button>
             </div>
