@@ -1,9 +1,70 @@
+import { useEffect, useState, useRef } from "react";
 import { NavLink } from "react-router-dom";
 import useClock from "../hooks/useClock.js";
 import SomaAudio from "../lib/soma-audio";
 
+// Polling de health cada 60s. Si la app está en background el navegador
+// pausa setInterval — al volver al foco, el visibilitychange dispara
+// un refetch inmediato para que los badges no muestren estado stale.
+const HEALTH_POLL_MS = 60_000;
+
+function statusLabel(dep) {
+  if (!dep) return { label: "—",   cls: "" };
+  if (dep.status === "ok")           return { label: "OK",  cls: "acc" };
+  if (dep.status === "missing-key")  return { label: "?",   cls: "warn" };
+  return { label: "ERR", cls: "neg" };
+}
+
 export default function TopNav() {
   const { hms } = useClock();
+  const [health, setHealth] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshLockRef = useRef(false);
+
+  // Health polling
+  useEffect(() => {
+    let alive = true;
+    const fetchHealth = async () => {
+      try {
+        const r = await fetch("/api/health", { cache: "no-store" });
+        if (!r.ok) throw new Error(`health ${r.status}`);
+        const j = await r.json();
+        if (alive) setHealth(j);
+      } catch {
+        if (alive) setHealth({ kit: { status: "error" }, zernio: { status: "error" } });
+      }
+    };
+    fetchHealth();
+    const t = setInterval(fetchHealth, HEALTH_POLL_MS);
+    const onVis = () => { if (document.visibilityState === "visible") fetchHealth(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // Botón Recargar — dispara evento global que cada página escucha.
+  // Lock anti-doble-tap durante 1.2s para evitar avalanchas si el usuario
+  // pulsa varias veces seguidas.
+  function handleRefresh() {
+    if (refreshLockRef.current) return;
+    refreshLockRef.current = true;
+    setRefreshing(true);
+    SomaAudio.tap();
+    window.dispatchEvent(new CustomEvent("app:refresh"));
+    // Refrescamos health también, así Soma ve si Kit/Zernio están vivos ahora.
+    fetch("/api/health", { cache: "no-store" })
+      .then((r) => r.json()).then((j) => setHealth(j)).catch(() => {});
+    setTimeout(() => {
+      refreshLockRef.current = false;
+      setRefreshing(false);
+    }, 1200);
+  }
+
+  const kit = statusLabel(health?.kit);
+  const zernio = statusLabel(health?.zernio);
 
   return (
     <nav className="contenido-nav">
@@ -92,11 +153,11 @@ export default function TopNav() {
         </span>
         <span className="sep"></span>
         <span className="item">
-          KIT <b className="acc">OK</b>
+          KIT <b className={kit.cls}>{kit.label}</b>
         </span>
         <span className="sep"></span>
         <span className="item">
-          ZERNIO <b className="acc">OK</b>
+          ZERNIO <b className={zernio.cls}>{zernio.label}</b>
         </span>
         <span className="sep"></span>
         <span className="item">
@@ -109,7 +170,13 @@ export default function TopNav() {
       </div>
 
       <div className="contenido-actions">
-        <button className="iconbtn sync" data-tip="Recargar">
+        <button
+          className="iconbtn sync"
+          data-tip={refreshing ? "Recargando…" : "Recargar"}
+          onClick={handleRefresh}
+          disabled={refreshing}
+          style={refreshing ? { opacity: 0.55, cursor: "wait" } : undefined}
+        >
           <svg className="ico" viewBox="0 0 16 16">
             <path d="M2 8a6 6 0 0 1 10-4.5M14 8a6 6 0 0 1-10 4.5M11 3.5h3v-3M5 12.5H2v3" />
           </svg>
