@@ -118,14 +118,28 @@ export default function TopNav() {
             <path d="M9 1L3 9h4l-1 6 6-8H8l1-6Z" />
           </svg>
         </button>
-        <button className="iconbtn settings" data-tip="Ajustes">
+        <button
+          className="iconbtn tweaks"
+          data-tip="Tweaks"
+          onClick={() =>
+            window.dispatchEvent(new CustomEvent("tweaks:toggle"))
+          }
+        >
           <svg className="ico" viewBox="0 0 16 16">
-            <circle cx="8" cy="8" r="2.4" />
-            <path d="M8 1v2M8 13v2M15 8h-2M3 8H1M12.9 3.1l-1.4 1.4M4.5 11.5l-1.4 1.4M12.9 12.9l-1.4-1.4M4.5 4.5L3.1 3.1" />
+            <path d="M2 4h12M2 8h12M2 12h12" />
+            <circle cx="5" cy="4" r="1.5" fill="currentColor" />
+            <circle cx="10" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="6" cy="12" r="1.5" fill="currentColor" />
           </svg>
         </button>
         <button className="iconbtn logout" data-tip="Cerrar sesión">
-          <svg className="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+          <svg
+            className="ico"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+          >
             <path d="M6 2H2v12h4M10 5l3 3-3 3M6 8h7" />
           </svg>
         </button>
