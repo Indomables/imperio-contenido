@@ -14,6 +14,7 @@ import ZernioNotifRow from "./ZernioNotifRow.jsx";
 import ZernioInboxZero from "./ZernioInboxZero.jsx";
 import ZernioLoading from "./ZernioLoading.jsx";
 import ZernioError from "./ZernioError.jsx";
+import SomaAudio from "../../lib/soma-audio";
 
 const SORT_INBOX = [
   { id: "recent",     label: "Más recientes" },
@@ -66,7 +67,10 @@ export default function ZernioList({
               key={s.id}
               type="button"
               className={`chip${sort === s.id ? " on" : ""}`}
-              onClick={() => onSortChange?.(s.id)}
+              onClick={() => {
+                SomaAudio.tap();
+                onSortChange?.(s.id);
+              }}
             >
               {s.label}
             </button>
