@@ -1,6 +1,14 @@
 /**
  * AnalisisChat — Chat IA embebido en la pestaña Análisis.
  *
+ * v0.63 · Rediseño visual estilo Captura Global.
+ *   · Eliminados los 5 ejemplos sugeridos y el texto introductorio.
+ *   · Input rediseñado: input + botón ENVIAR rellenado en ámbar a la
+ *     derecha (mismo lenguaje que el bloque de Captura del Dashboard).
+ *   · Barra inferior con contadores acumulados de sesión: consultas
+ *     totales, tokens in/out y coste estimado en €.
+ *   · Header arriba se mantiene (CHAT IA · SONNET 4.6 · CONECTADO A KIT V4).
+ *
  * v0.62 · Primer cut. Habla con `/api/chat` (Sonnet 4.6 + tools de Kit v4).
  *
  * Mantiene el historial en estado local (no se persiste — se pierde al
@@ -22,15 +30,35 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import SomaAudio from "../lib/soma-audio";
 
-const HINT = [
-  "Resume mis últimos 5 broadcasts",
-  "Top 10 emails por open rate este trimestre",
-  "Qué tags tengo y cuáles parecen huérfanos",
-  "Cómo va el crecimiento de mi lista últimos 90 días",
-  "Dame los clicks por link del email Necesito tu voz",
-];
-
 const MAX_INPUT_LEN = 1500;
+
+// ─── Precios Sonnet 4.6 (Anthropic API) ──────────────────────────
+// USD por millón de tokens. Si Anthropic cambia precios, actualizar aquí.
+// https://www.anthropic.com/pricing
+const PRICE_INPUT_USD_PER_MTOK = 3.0;
+const PRICE_OUTPUT_USD_PER_MTOK = 15.0;
+// Tipo de cambio aproximado USD → EUR. Ajustable.
+const USD_TO_EUR = 0.92;
+
+function calcCostEur(inputTokens, outputTokens) {
+  const usd =
+    (inputTokens / 1_000_000) * PRICE_INPUT_USD_PER_MTOK +
+    (outputTokens / 1_000_000) * PRICE_OUTPUT_USD_PER_MTOK;
+  return usd * USD_TO_EUR;
+}
+
+function formatTokens(n) {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+function formatEur(n) {
+  // < 1 céntimo: 4 decimales. < 1 €: 3 decimales. ≥ 1 €: 2 decimales.
+  if (n < 0.01) return `${n.toFixed(4)} €`;
+  if (n < 1)    return `${n.toFixed(3)} €`;
+  return `${n.toFixed(2)} €`;
+}
 
 function ToolBlock({ event }) {
   // event.type === "tool_use" o "tool_result"
@@ -100,6 +128,15 @@ export default function AnalisisChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+
+  // Contador acumulado de toda la sesión (desde que se montó el componente).
+  // No se persiste — al recargar la página se resetea.
+  const [sessionStats, setSessionStats] = useState({
+    queries: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  });
+
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -158,6 +195,14 @@ export default function AnalisisChat() {
         events: j.events || [],
         usage: j.usage,
       }]);
+      // Acumular stats de sesión
+      if (j.usage) {
+        setSessionStats((s) => ({
+          queries: s.queries + 1,
+          inputTokens:  s.inputTokens  + (j.usage.input_tokens  || 0),
+          outputTokens: s.outputTokens + (j.usage.output_tokens || 0),
+        }));
+      }
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
@@ -173,6 +218,8 @@ export default function AnalisisChat() {
     setTurns([]);
     setErr(null);
     setInput("");
+    // No reseteamos sessionStats — el contador de sesión persiste
+    // mientras la pestaña esté abierta, aunque se borre el historial.
   }
 
   function handleKey(e) {
@@ -181,6 +228,10 @@ export default function AnalisisChat() {
       send();
     }
   }
+
+  // ─── Derivados para la barra inferior ────────────────────────
+  const totalTokens = sessionStats.inputTokens + sessionStats.outputTokens;
+  const costEur = calcCostEur(sessionStats.inputTokens, sessionStats.outputTokens);
 
   return (
     <section className="an-chat" style={{
@@ -252,39 +303,6 @@ export default function AnalisisChat() {
         padding: "12px 16px",
         fontFamily: "var(--sans, system-ui)",
       }}>
-        {turns.length === 0 && !busy && (
-          <div style={{ color: "var(--ink-4, #6b6b6b)" }}>
-            <div style={{ fontSize: 13, marginBottom: 10 }}>
-              Pregúntame lo que quieras sobre tu cuenta de Kit. Algunos ejemplos:
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {HINT.map((h) => (
-                <button
-                  key={h}
-                  type="button"
-                  onClick={() => send(h)}
-                  disabled={busy}
-                  style={{
-                    textAlign: "left",
-                    background: "transparent",
-                    border: "1px solid var(--line, #2a2a2a)",
-                    color: "var(--ink-2, #ccc)",
-                    fontFamily: "var(--sans)",
-                    fontSize: 12,
-                    padding: "8px 10px",
-                    cursor: "pointer",
-                    borderRadius: 2,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--acc, #c8a06b)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--line, #2a2a2a)"; }}
-                >
-                  › {h}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {turns.map((t, idx) => {
           if (t.role === "user") {
             return <TextBlock key={idx} content={t.content} role="user" />;
@@ -340,20 +358,26 @@ export default function AnalisisChat() {
         )}
       </div>
 
-      {/* Input */}
+      {/* Input — estilo Captura Global del Dashboard.
+          Una sola línea horizontal con flecha › a la izquierda y botón
+          ENVIAR ámbar relleno a la derecha. */}
       <form
         onSubmit={(e) => { e.preventDefault(); send(); }}
         style={{
           display: "flex",
-          gap: 8,
-          padding: "10px 14px",
+          alignItems: "center",
+          gap: 10,
+          padding: "14px 18px",
           borderTop: "1px solid var(--line, #2a2a2a)",
-          background: "rgba(0,0,0,0.2)",
+          background: "transparent",
         }}
       >
         <span style={{
-          fontFamily: "var(--mono)", color: "var(--acc, #c8a06b)",
-          fontSize: 16, lineHeight: "32px",
+          fontFamily: "var(--mono)",
+          color: "var(--acc, #c8a06b)",
+          fontSize: 16,
+          lineHeight: 1,
+          flexShrink: 0,
         }}>›</span>
         <input
           ref={inputRef}
@@ -370,8 +394,9 @@ export default function AnalisisChat() {
             outline: "none",
             color: "var(--ink, #fff)",
             fontFamily: "var(--sans)",
-            fontSize: 13,
-            padding: "6px 4px",
+            fontSize: 14,
+            padding: "8px 4px",
+            minWidth: 0,
           }}
         />
         <button
@@ -379,20 +404,65 @@ export default function AnalisisChat() {
           disabled={busy || !input.trim()}
           style={{
             background: input.trim() && !busy ? "var(--acc, #c8a06b)" : "transparent",
-            border: "1px solid var(--acc, #c8a06b)",
-            color: input.trim() && !busy ? "#000" : "var(--ink-3, #999)",
+            border: input.trim() && !busy ? "1px solid var(--acc, #c8a06b)" : "1px solid var(--line, #2a2a2a)",
+            color: input.trim() && !busy ? "#000" : "var(--ink-4, #6b6b6b)",
             fontFamily: "var(--mono)",
-            fontSize: 10,
-            letterSpacing: "0.16em",
+            fontSize: 11,
+            letterSpacing: "0.18em",
             textTransform: "uppercase",
-            padding: "6px 14px",
+            padding: "10px 20px",
             cursor: busy || !input.trim() ? "not-allowed" : "pointer",
+            fontWeight: 600,
             transition: "all 120ms",
+            flexShrink: 0,
           }}
         >
           Enviar →
         </button>
       </form>
+
+      {/* Barra de estado inferior — contadores acumulados de sesión.
+          Mismo lenguaje visual que la barrita "MODO CREATIVE / FLOW" del
+          bloque de Captura Global. */}
+      <div style={{
+        padding: "8px 18px",
+        borderTop: "1px solid var(--line, #2a2a2a)",
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        fontFamily: "var(--mono)",
+        fontSize: 9,
+        letterSpacing: "0.16em",
+        textTransform: "uppercase",
+        color: "var(--ink-4, #6b6b6b)",
+        background: "rgba(0,0,0,0.2)",
+      }}>
+        <span style={{
+          display: "inline-block",
+          width: 5, height: 5, borderRadius: "50%",
+          background: sessionStats.queries > 0 ? "var(--acc, #c8a06b)" : "var(--ink-5, #555)",
+        }} />
+        <span>
+          SESIÓN ·{" "}
+          <b style={{ color: "var(--ink-2, #ccc)" }}>{sessionStats.queries}</b>
+          {" "}consultas
+        </span>
+        <span style={{ color: "var(--ink-5, #555)" }}>·</span>
+        <span>
+          <b style={{ color: "var(--ink-2, #ccc)" }}>{formatTokens(sessionStats.inputTokens)}</b>
+          {" "}in ·{" "}
+          <b style={{ color: "var(--ink-2, #ccc)" }}>{formatTokens(sessionStats.outputTokens)}</b>
+          {" "}out
+        </span>
+        <span style={{ color: "var(--ink-5, #555)" }}>·</span>
+        <span>
+          TOTAL <b style={{ color: "var(--ink-2, #ccc)" }}>{formatTokens(totalTokens)}</b>
+        </span>
+        <span style={{ marginLeft: "auto" }}>
+          COSTE{" "}
+          <b style={{ color: "var(--acc, #c8a06b)" }}>{formatEur(costEur)}</b>
+        </span>
+      </div>
 
       {/* Animación del pulso del "Pensando" */}
       <style>{`
