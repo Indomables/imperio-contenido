@@ -5,6 +5,8 @@
  * edge health dinámica (estado operational/degraded/down con LED y desc adaptados).
  */
 
+import SomaAudio from "../../lib/soma-audio";
+
 const INTENT_CHIPS = [
   { id: "hermandad", label: "Hermandad" },
   { id: "elite",     label: "Élite" },
@@ -159,7 +161,10 @@ export default function ZernioSidebar({
               textTransform: "uppercase",
               cursor: "pointer",
             }}
-            onClick={onResetFilters}
+            onClick={() => {
+              SomaAudio.tap();
+              onResetFilters?.();
+            }}
           >
             RESET
           </button>
@@ -174,7 +179,10 @@ export default function ZernioSidebar({
                   key={c.id}
                   type="button"
                   className={`zchip int-${c.id}${filters?.intents.has(c.id) ? " on" : ""}`}
-                  onClick={() => onToggleIntent?.(c.id)}
+                  onClick={() => {
+                    SomaAudio.tap();
+                    onToggleIntent?.(c.id);
+                  }}
                 >
                   <span className="d"></span>
                   {c.label}
@@ -192,7 +200,10 @@ export default function ZernioSidebar({
                   key={c.id}
                   type="button"
                   className={`zchip temp-${c.id}${filters?.temperatures.has(c.id) ? " on" : ""}`}
-                  onClick={() => onToggleTemperature?.(c.id)}
+                  onClick={() => {
+                    SomaAudio.tap();
+                    onToggleTemperature?.(c.id);
+                  }}
                 >
                   <span className="d"></span>
                   {c.label}
@@ -210,7 +221,10 @@ export default function ZernioSidebar({
                   key={c.id}
                   type="button"
                   className={`zchip${filters?.confidenceRange === c.id ? " on" : ""}`}
-                  onClick={() => onSetConfidenceRange?.(c.id)}
+                  onClick={() => {
+                    SomaAudio.tap();
+                    onSetConfidenceRange?.(c.id);
+                  }}
                 >
                   {c.label}
                 </button>
