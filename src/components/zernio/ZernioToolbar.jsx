@@ -19,6 +19,8 @@
  *   onSearchChange    — (q) => void
  */
 
+import SomaAudio from "../../lib/soma-audio";
+
 export default function ZernioToolbar({
   view = "inbox",
   pendingCount = 0,
@@ -33,7 +35,10 @@ export default function ZernioToolbar({
         <button
           type="button"
           className={`vtab${view === "inbox" ? " on" : ""}`}
-          onClick={() => onViewChange?.("inbox")}
+          onClick={() => {
+            SomaAudio.tap();
+            onViewChange?.("inbox");
+          }}
           data-view="inbox"
         >
           Inbox
@@ -42,7 +47,10 @@ export default function ZernioToolbar({
         <button
           type="button"
           className={`vtab${view === "historico" ? " on" : ""}`}
-          onClick={() => onViewChange?.("historico")}
+          onClick={() => {
+            SomaAudio.tap();
+            onViewChange?.("historico");
+          }}
           data-view="historico"
         >
           Histórico
